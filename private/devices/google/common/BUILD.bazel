@@ -62,4 +62,5 @@ extracted_system_dlkm(
 exports_files([
     "disable_32bit.fragment",
     "disable_slab_canary.fragment",
+    "disable_randstruct.fragment",
 ])
