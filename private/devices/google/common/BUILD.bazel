@@ -58,3 +58,7 @@ extracted_system_dlkm(
     gki_modules = get_pixel_gki_modules_list(map_each = paths.basename),
     images = "//common:kernel_aarch64_images",
 )
+
+exports_files([
+    "disable_32bit.fragment",
+])
