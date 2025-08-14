@@ -4,3 +4,6 @@
 
 build:akita --config=zuma_base
 build:akita --//private/devices/google/common:kernel=//private/devices/google/akita:akita/kernel
+
+# GrapheneOS uses MTE instead of slab canaries on this device.
+build:akita --defconfig_fragment=//private/devices/google/common:disable_slab_canary.fragment
