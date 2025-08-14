@@ -4,3 +4,6 @@
 
 build:shusky --config=zuma_base
 build:shusky --//private/devices/google/common:kernel=//private/devices/google/shusky:shusky/kernel
+
+# GrapheneOS uses MTE instead of slab canaries on this device.
+build:shusky --defconfig_fragment=//private/devices/google/common:disable_slab_canary.fragment

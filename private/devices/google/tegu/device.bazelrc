@@ -4,3 +4,6 @@
 
 build:tegu --config=zumapro_base
 build:tegu --//private/devices/google/common:kernel=//private/devices/google/tegu:tegu/kernel
+
+# GrapheneOS uses MTE instead of slab canaries on this device.
+build:tegu --defconfig_fragment=//private/devices/google/common:disable_slab_canary.fragment

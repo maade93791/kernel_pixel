@@ -4,3 +4,6 @@
 
 build:stallion --config=zumapro_base
 build:stallion --//private/devices/google/common:kernel=//private/devices/google/stallion:stallion/kernel
+
+# GrapheneOS uses MTE instead of slab canaries on this device.
+build:stallion --defconfig_fragment=//private/devices/google/common:disable_slab_canary.fragment

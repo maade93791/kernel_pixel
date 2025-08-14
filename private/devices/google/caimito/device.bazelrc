@@ -5,3 +5,6 @@
 build:caimito --config=zumapro_base
 build:caimito --//private/devices/google/common:kernel=//private/devices/google/caimito:caimito/kernel
 build:caimito --//private/google-modules/touch/common/v1:touch_udfps_notification=enabled
+
+# GrapheneOS uses MTE instead of slab canaries on this device.
+build:caimito --defconfig_fragment=//private/devices/google/common:disable_slab_canary.fragment
