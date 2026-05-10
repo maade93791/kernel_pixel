@@ -17,6 +17,7 @@ EOF
 fi
 
 exec "${WORKSPACE_DIR}/tools/bazel" run \
+  --config=stamp \
   --config="${DEVICE}" \
   "//private/devices/google/${DEVICE}:${DEVICE}/dist" \
   "$@"
