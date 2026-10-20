@@ -12,18 +12,6 @@
 #include "aoc_usb.h"
 
 /*
- * 1: enable AP suspend support
- * 0: disable AP suspend support
- */
-#define ap_suspend_enabled 1
-
-/*
- * Return true when the platform supports AP suspend with USB awake.
- * Currently this will respond to Kernel alsa pcm driver.
- */
-
-
-/*
  * Set bypass = 1 will skip USB suspend.
  */
 static void usb_vendor_dev_suspend(void *unused, struct usb_device *udev,
@@ -76,7 +64,7 @@ int usb_vendor_helper_init(void)
 {
 	int ret = 0;
 
-	if (ap_suspend_enabled) {
+	if (AOC_USB_AP_SUSPEND_ENABLED) {
 		pr_info("%s: AP suspend support is enabled\n", __func__);
 	} else {
 		pr_info("%s: AP suspend support is disabled\n", __func__);
