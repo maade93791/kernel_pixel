@@ -908,7 +908,7 @@ wl_cfg80211_handle_discovery_config(struct bcm_cfg80211 *cfg,
 	if (disable_nan) {
 #ifdef WL_NAN
 		/* Disable nan to avoid conflict with p2p */
-		ret = wl_cfgnan_check_nan_disable_pending(cfg, true, true);
+		ret = wl_cfgnan_check_nan_disable_pending(cfg, true);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to disable nan, error[%d]\n", ret));
 			return ret;
