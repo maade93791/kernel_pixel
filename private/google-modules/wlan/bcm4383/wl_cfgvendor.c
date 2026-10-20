@@ -1838,7 +1838,10 @@ wl_cfgvendor_set_hal_started(struct wiphy *wiphy,
 						(char*)nla_data(data)));
 				}
 				WL_INFORM(("%s, dhd_open start\n", __FUNCTION__));
+				/* Open/stop reenters native netdevice lifecycle paths. */
+				wiphy_unlock(wiphy);
 				ret = dhd_open(ndev);
+				wiphy_lock(wiphy);
 				if (ret != BCME_OK) {
 					WL_INFORM(("%s, dhd_open failed\n", __FUNCTION__));
 					goto exit;
@@ -1901,7 +1904,10 @@ wl_cfgvendor_stop_hal(struct wiphy *wiphy,
 	if (dhd->stop_in_progress) {
 		WL_INFORM(("dhd_stop in progress, skip\n"));
 	} else if (dhd->if_opened) {
+		/* Open/stop reenters native netdevice lifecycle paths. */
+		wiphy_unlock(wiphy);
 		dhd_stop(ndev);
+		wiphy_lock(wiphy);
 	}
 	cfg->hal_state = HAL_IDLE;
 	return BCME_OK;
@@ -15549,7 +15555,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = DEBUG_SET_HAL_START
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_set_hal_started,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = hal_start_attr_policy,
@@ -15561,7 +15568,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = DEBUG_SET_HAL_STOP
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_stop_hal
 	},
 	{

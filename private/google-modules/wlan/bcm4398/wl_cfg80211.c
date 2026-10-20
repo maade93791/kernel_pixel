@@ -21625,7 +21625,10 @@ static s32 __wl_cfg80211_down(struct bcm_cfg80211 *cfg)
 		 * "ifconfig <primary_iface> down", cleanup any left
 		 * over interfaces
 		 */
+		/* Close notifiers/native unregister may reenter driver callbacks. */
+		mutex_unlock(&cfg->usr_sync);
 		wl_cfg80211_cleanup_virtual_ifaces(cfg, false);
+		mutex_lock(&cfg->usr_sync);
 	}
 	/* Clear used mac addr mask */
 	cfg->vif_macaddr_mask = 0;
