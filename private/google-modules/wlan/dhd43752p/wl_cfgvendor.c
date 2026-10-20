@@ -3229,7 +3229,10 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			WL_DBG(("vendor_command: %s len: %u \n", cmd_buf, cmd_buf_len));
 			// modify for compatibility
 			#ifdef OEM_ANDROID
+			/* Match the native RTNL-only Android IOCTL entry. */
+			wiphy_unlock(wiphy);
 			bytes_written = wl_handle_private_cmd(net, cmd_buf, cmd_buf_len);
+			wiphy_lock(wiphy);
 			WL_DBG(("bytes_written: %d \n", bytes_written));
 			if (bytes_written == 0) {
 				snprintf(cmd_buf, cmd_buf_len, "%s", "OK");
@@ -12243,7 +12246,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_BRCM,
 			.subcmd = BRCM_VENDOR_SCMD_BCM_STR
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_priv_bcm_handler,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = brcm_drv_attr_policy,
