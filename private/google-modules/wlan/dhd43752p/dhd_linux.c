@@ -8614,6 +8614,17 @@ EXPORT_SYMBOL(dhd_bus_retry_hang_recovery);
 
 void dhd_unregister_net(struct net_device *net, bool need_rtnl_lock)
 {
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy = net->ieee80211_ptr ? net->ieee80211_ptr->wiphy : NULL;
+
+	if (!wiphy) {
+		if (need_rtnl_lock)
+			unregister_netdev(net);
+		else
+			unregister_netdevice(net);
+		return;
+	}
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 	wl_cfg80211_quiesce_wiphy_events(net->ieee80211_ptr);
 #endif
@@ -8621,7 +8632,15 @@ void dhd_unregister_net(struct net_device *net, bool need_rtnl_lock)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	if (need_rtnl_lock) {
 		rtnl_lock();
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		if (net->reg_state == NETREG_REGISTERED && (net->flags & IFF_UP))
+			dev_close(net);
+		wiphy_lock(wiphy);
+#endif
 		cfg80211_unregister_netdevice(net);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		wiphy_unlock(wiphy);
+#endif
 		rtnl_unlock();
 	} else {
 		cfg80211_unregister_netdevice(net);
@@ -8639,6 +8658,11 @@ void dhd_unregister_net(struct net_device *net, bool need_rtnl_lock)
 int dhd_register_net(struct net_device *net, bool need_rtnl_lock)
 {
 	int err = 0;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Plain monitor netdevs have no cfg80211 wireless_dev. */
+	if (!net->ieee80211_ptr)
+		return need_rtnl_lock ? register_netdev(net) : register_netdevice(net);
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	if (need_rtnl_lock) {
 		rtnl_lock();
@@ -10604,6 +10628,15 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 
 	if (ifp != NULL) {
 		if (ifp->net != NULL) {
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			/* The outer owner must close before taking wiphy/private locks. */
+			if (ifp->net->reg_state == NETREG_REGISTERED &&
+			    (ifp->net->flags & IFF_UP)) {
+				DHD_ERROR(("%s: refusing live IF collision at ifidx:%d\n",
+					__FUNCTION__, ifidx));
+				return NULL;
+			}
+#endif
 			DHD_ERROR(("%s: free existing IF %s ifidx:%d \n",
 				__FUNCTION__, ifp->net->name, ifidx));
 
