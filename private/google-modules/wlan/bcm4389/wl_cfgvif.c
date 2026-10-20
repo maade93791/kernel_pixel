@@ -355,11 +355,23 @@ wl_cfgvif_delayed_remove_iface_work(struct work_struct *work)
 {
 	struct bcm_cfg80211 *cfg = NULL;
 	struct net_device *ndev;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy;
+	dhd_pub_t *dhdp;
+#endif
 
 	BCM_SET_CONTAINER_OF(cfg, work, struct bcm_cfg80211, remove_iface_work.work);
 
 	if (cfg->if_event_info.ifidx) {
 		ndev = bcmcfg_to_prmry_ndev(cfg);
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		dhdp = cfg->pub;
+		wiphy = dhd_netdev_lifecycle_lock(dhdp, cfg->if_event_info.ifidx);
+		if (IS_ERR(wiphy))
+			return;
+		wl_cfg80211_remove_if(cfg, cfg->if_event_info.ifidx, ndev, FALSE);
+		dhd_netdev_lifecycle_unlock(dhdp, wiphy);
+#else
 
 #ifdef BCMDONGLEHOST
 		dhd_net_if_lock(ndev);
@@ -372,6 +384,7 @@ wl_cfgvif_delayed_remove_iface_work(struct work_struct *work)
 #ifdef BCMDONGLEHOST
 		dhd_net_if_unlock(ndev);
 #endif /* BCMDONGLEHOST */
+#endif /* native lifecycle ownership */
 	}
 	return;
 }
@@ -1519,6 +1532,56 @@ exit:
 void
 wl_cfg80211_cleanup_virtual_ifaces(struct bcm_cfg80211 *cfg, bool rtnl_lock_reqd)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *targets[WL_MAX_IFS + DHD_MAX_STATIC_IFS];
+	struct net_info *iter, *next;
+	struct net_device *primary_ndev = bcmcfg_to_prmry_ndev(cfg);
+	unsigned int count = 0, i;
+
+	/* Caller owns RTNL; ndo_stop must run without wiphy/private mutexes. */
+	ASSERT_RTNL();
+	BCM_REFERENCE(rtnl_lock_reqd);
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
+	mutex_lock(&cfg->if_sync);
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
+	for_each_ndev(cfg, iter, next) {
+		GCC_DIAGNOSTIC_POP();
+		if (!iter->ndev || iter->ndev == primary_ndev)
+			continue;
+#ifdef WL_STATIC_IF
+		if (IS_CFG80211_STATIC_IF(cfg, iter->ndev))
+			continue;
+#endif
+		/* Every host netdev has a real firmware or persistent static slot. */
+		if (WARN_ON_ONCE(count == ARRAY_SIZE(targets)))
+			break;
+		dev_hold(iter->ndev);
+		targets[count++] = iter->ndev;
+	}
+	mutex_unlock(&cfg->if_sync);
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
+
+	for (i = 0; i < count; i++) {
+		struct net_device *ndev = targets[i];
+
+		WL_INFORM(("Cleaning up iface:%s\n", ndev->name));
+		if (ndev->flags & IFF_UP)
+			dev_close(ndev);
+#if defined(WLAN_ACCEL_BOOT)
+		WL_ERR(("Setting forced reg_on to ensure clearing interface states in FW\n"));
+		dhd_dev_set_accel_force_reg_on(ndev);
+#endif
+		wiphy_lock(bcmcfg_to_wiphy(cfg));
+		mutex_lock(&cfg->if_sync);
+		/* Static ndo_stop may already have removed its firmware net_info. */
+		if (ndev->ieee80211_ptr &&
+		    wl_get_netinfo_by_wdev(cfg, ndev->ieee80211_ptr))
+			wl_cfg80211_post_ifdel(ndev, false, 0);
+		mutex_unlock(&cfg->if_sync);
+		wiphy_unlock(bcmcfg_to_wiphy(cfg));
+		dev_put(ndev);
+	}
+#else
 	struct net_info *iter, *next;
 	struct net_device *primary_ndev;
 
@@ -1559,6 +1622,7 @@ wl_cfg80211_cleanup_virtual_ifaces(struct bcm_cfg80211 *cfg, bool rtnl_lock_reqd
 			}
 		}
 	}
+#endif
 }
 
 int
