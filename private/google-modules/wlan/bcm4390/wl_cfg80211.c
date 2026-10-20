@@ -2951,16 +2951,36 @@ exit:
 }
 
 struct wireless_dev *
-wl_cfg80211_add_if(struct bcm_cfg80211 *cfg,
+wl_cfg80211_add_if_locked(struct bcm_cfg80211 *cfg,
 	struct net_device *primary_ndev,
 	wl_iftype_t wl_iftype, const char *name, const u8 *mac)
 {
 	struct wireless_dev *wdev = NULL;
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(bcmcfg_to_wiphy(cfg));
 	mutex_lock(&cfg->if_sync);
 	DHD_OS_WAKE_LOCK((dhd_pub_t *)(cfg->pub));
 	wdev = _wl_cfg80211_add_if(cfg, primary_ndev, wl_iftype, name, mac);
 	DHD_OS_WAKE_UNLOCK((dhd_pub_t *)(cfg->pub));
 	mutex_unlock(&cfg->if_sync);
+	return wdev;
+}
+
+/* Android IOCTL and ndo_open callers own RTNL, but not wiphy. */
+struct wireless_dev *
+wl_cfg80211_add_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+	wl_iftype_t wl_iftype, const char *name, const u8 *mac)
+{
+	struct wireless_dev *wdev;
+	struct wiphy *wiphy;
+
+	if (!cfg)
+		return NULL;
+	ASSERT_RTNL();
+	wiphy = bcmcfg_to_wiphy(cfg);
+	wiphy_lock(wiphy);
+	wdev = wl_cfg80211_add_if_locked(cfg, primary_ndev, wl_iftype, name, mac);
+	wiphy_unlock(wiphy);
 	return wdev;
 }
 

@@ -1230,7 +1230,7 @@ wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,
 		return ERR_PTR(-EINVAL);
 	}
 
-	wdev = wl_cfg80211_add_if(cfg, primary_ndev, wl_iftype, name, NULL);
+	wdev = wl_cfg80211_add_if_locked(cfg, primary_ndev, wl_iftype, name, NULL);
 	if (unlikely(!wdev)) {
 		return ERR_PTR(-ENODEV);
 	}
