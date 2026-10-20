@@ -2174,6 +2174,8 @@ struct bcm_cfg80211 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 	/* Never acquire if_sync or wiphy mutex while holding this mutex. */
 	struct mutex wiphy_event_sync;
+	/* wiphy -> auth_event_sync -> wiphy_event_sync; FW holds if_sync first. */
+	struct mutex auth_event_sync;
 	struct wiphy_work wiphy_event_work;
 	struct list_head wiphy_events;
 	u64 wiphy_event_generation;
