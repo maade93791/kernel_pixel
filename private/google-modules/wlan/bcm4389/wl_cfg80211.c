@@ -632,6 +632,10 @@ static int wl_cfg80211_del_pmk(struct wiphy *wiphy, struct net_device *dev,
  */
 static s32 wl_create_event_handler(struct bcm_cfg80211 *cfg);
 static void wl_destroy_event_handler(struct bcm_cfg80211 *cfg);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void wl_stop_wiphy_events(struct bcm_cfg80211 *cfg);
+static void wl_wiphy_event_work(struct wiphy *wiphy, struct wiphy_work *work);
+#endif
 static void wl_event_handler(struct work_struct *work_data);
 static void wl_init_eq(struct bcm_cfg80211 *cfg);
 static void wl_flush_eq(struct bcm_cfg80211 *cfg);
@@ -3790,11 +3794,9 @@ wl_cfg80211_post_ifcreate(struct net_device *ndev,
 		if (wl_cfg80211_register_if(cfg, event->ifidx, new_ndev, rtnl_lock_reqd)
 			!= BCME_OK) {
 			WL_ERR(("IFACE register failed \n"));
-			/* Post interface registration, wdev would be freed from the netdev
-			 * destructor path. For other cases, handle it here.
-			 */
-			MFREE(cfg->osh, wdev, sizeof(*wdev));
+			/* Interface removal uses wdev to quiesce pending notifications. */
 			wl_cfg80211_remove_if(cfg, event->ifidx, new_ndev, rtnl_lock_reqd);
+			MFREE(cfg->osh, wdev, sizeof(*wdev));
 			return NULL;
 		}
 	}
@@ -6797,6 +6799,9 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	wlcfg_assoc_info_t assoc_info;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+#endif
 	WL_DBG(("Enter len=%zu\n", sme->ie_len));
 	RETURN_EIO_IF_NOT_UP(cfg);
 
@@ -6954,6 +6959,9 @@ wl_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 #ifdef WL_CFGVENDOR_CUST_ADVLOG
 	scb_val_t scb_rssi;
 #endif /* WL_CFGVENDOR_CUST_ADVLOG */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(wdev);
+#endif
 	RETURN_EIO_IF_NOT_UP(cfg);
 
 #ifdef BCMDONGLEHOST
@@ -11676,6 +11684,17 @@ static s32 wl_setup_wiphy(struct wireless_dev *wdev, struct device *sdiofunc_dev
 		err = -ENOMEM;
 		return err;
 	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	{
+		struct bcm_cfg80211 *cfg = wiphy_priv(wdev->wiphy);
+
+		mutex_init(&cfg->wiphy_event_sync);
+		mutex_init(&cfg->auth_event_sync);
+		INIT_LIST_HEAD(&cfg->wiphy_events);
+		wiphy_work_init(&cfg->wiphy_event_work, wl_wiphy_event_work);
+		cfg->wiphy_events_stopped = true;
+	}
+#endif
 	set_wiphy_dev(wdev->wiphy, sdiofunc_dev);
 	wdev->wiphy->max_scan_ie_len = WL_SCAN_IE_LEN_MAX;
 	/* Report  how many SSIDs Driver can support per Scan request */
@@ -11929,6 +11948,9 @@ static void wl_free_wdev(struct bcm_cfg80211 *cfg)
 	}
 
 	ndev = wdev->netdev;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_stop_wiphy_events(cfg);
+#endif
 	if (wdev->wiphy) {
 		wiphy = wdev->wiphy;
 
@@ -12998,6 +13020,9 @@ wl_handle_link_down(struct bcm_cfg80211 *cfg, wl_assoc_status_t *as)
 	}
 #endif /* WL_WPS_SYNC */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 	if (!wl_get_drv_status(cfg, DISCONNECTING, ndev)) {
 #ifdef BCMDONGLEHOST
 		DHD_STATLOG_CTRL(dhdp, ST(DISASSOC_INT_START),
@@ -14745,6 +14770,9 @@ wl_bss_roaming_done(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	/* Update channel info for debuggability */
 	wl_connected_channel_debuggability(cfg, ndev);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 	cfg80211_roamed(ndev, &roam_info, GFP_KERNEL);
 #else
 	cfg80211_roamed(ndev,
@@ -15012,6 +15040,9 @@ wl_bss_connect_done(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	wl_cfgscan_cancel_scan(cfg);
 	bzero(&cfg->last_roamed_addr, ETHER_ADDR_LEN);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 	if (completed) {
 		wl_get_assoc_ies(cfg, ndev);
 		wl_update_prof(cfg, ndev, NULL, (const void *)(e->addr.octet),
@@ -16145,6 +16176,206 @@ static void wl_deinit_priv_mem(struct bcm_cfg80211 *cfg)
 
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void wl_free_wiphy_event(struct bcm_cfg80211 *cfg, struct wl_wiphy_event *event)
+{
+	if (event->wake_held)
+		DHD_OS_WAKE_UNLOCK(cfg->pub);
+	kfree(event);
+}
+
+static void wl_wiphy_event_work(struct wiphy *wiphy, struct wiphy_work *work)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct wl_wiphy_event *event;
+
+	/* Do not let a firmware association transition race the auth command tail. */
+	mutex_lock(&cfg->auth_event_sync);
+	mutex_lock(&cfg->wiphy_event_sync);
+	while (!list_empty(&cfg->wiphy_events)) {
+		event = list_first_entry(&cfg->wiphy_events, struct wl_wiphy_event, list);
+		list_del(&event->list);
+		event->deliver(wiphy, event);
+		wl_free_wiphy_event(cfg, event);
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+	mutex_unlock(&cfg->auth_event_sync);
+}
+
+void wl_cfg80211_invalidate_wiphy_events(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_info *info;
+	unsigned long flags;
+
+	if (!wdev)
+		return;
+	cfg = wiphy_priv(wdev->wiphy);
+	/* Also called by the atomic WPS disconnect-indication path. */
+	if (wdev->identifier)
+		cfg80211_ch_switch_notify_cancel(wdev, -1);
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			info->association_generation++;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+}
+
+/*
+ * Wait out borrowed-device users before unregister or DHD-private cleanup.
+ * Release event_sync before any native operation can acquire RTNL or wiphy.
+ */
+void wl_cfg80211_quiesce_wiphy_events(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_info *info;
+	struct wl_wiphy_event *event, *next;
+	unsigned long flags;
+
+	if (!wdev || !wdev->wiphy)
+		return;
+	cfg = wiphy_priv(wdev->wiphy);
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (wdev->identifier)
+		cfg80211_ch_switch_notify_cancel(wdev, -1);
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			if (!info->wiphy_events_quiescing) {
+				info->wiphy_events_quiescing = true;
+				info->association_generation++;
+			}
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	/* A static interface may retain its wdev while netinfo is replaced. */
+	list_for_each_entry_safe(event, next, &cfg->wiphy_events, list) {
+		if (event->wdev_id == wdev->identifier) {
+			list_del(&event->list);
+			wl_free_wiphy_event(cfg, event);
+		}
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+
+/* Re-enable only an interface which completed native registration. */
+void wl_cfg80211_resume_wiphy_events(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_info *info;
+	unsigned long flags;
+
+	if (!wdev || !wdev->wiphy)
+		return;
+	cfg = wiphy_priv(wdev->wiphy);
+	mutex_lock(&cfg->wiphy_event_sync);
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			if (info->wiphy_events_quiescing) {
+				info->association_generation++;
+				info->wiphy_events_quiescing = false;
+			}
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+
+/* Serialize native event publication with the per-interface cancel barrier. */
+int wl_cfg80211_queue_ch_switch_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	const struct cfg80211_chan_def *chandef, unsigned int link_id)
+{
+	struct net_info *info;
+	unsigned long flags;
+	bool live = false;
+	int err = -ENODEV;
+
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped)
+		goto out;
+
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev && !info->wiphy_events_quiescing) {
+			live = true;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	if (live && wdev->identifier)
+		err = cfg80211_ch_switch_notify_queued(wdev->netdev, chandef, link_id, GFP_KERNEL);
+out:
+	mutex_unlock(&cfg->wiphy_event_sync);
+	return err;
+}
+
+s32
+wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	struct wl_wiphy_event *event, wl_wiphy_event_func_t func)
+{
+	struct net_info *info;
+	unsigned long flags;
+	int err = -ENODEV;
+
+	if (event->link_id >= IEEE80211_MLD_MAX_NUM_LINKS)
+		return -EINVAL;
+
+	/* Snapshot and publication share the barrier with interface quiesce. */
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped)
+		goto out;
+
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev && !info->wiphy_events_quiescing &&
+			wdev->identifier) {
+			event->wdev_id = wdev->identifier;
+			info->wiphy_event_id = event->wdev_id;
+			event->iftype = wdev->iftype;
+			event->association_generation = info->association_generation;
+			err = 0;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	if (err)
+		goto out;
+
+	event->deliver = func;
+	event->generation = cfg->wiphy_event_generation;
+#ifdef BCMDONGLEHOST
+	/* The event wake source itself does not support nested references. */
+	event->wake_held = dhd_os_wake_lock(cfg->pub) > 0;
+#endif
+	list_add_tail(&event->list, &cfg->wiphy_events);
+	wiphy_work_queue(bcmcfg_to_wiphy(cfg), &cfg->wiphy_event_work);
+out:
+	mutex_unlock(&cfg->wiphy_event_sync);
+	return err;
+}
+
+static void wl_stop_wiphy_events(struct bcm_cfg80211 *cfg)
+{
+	struct wl_wiphy_event *event, *next;
+
+	/* Wait for any firmware-facing callback before its resources are freed. */
+	mutex_lock(&cfg->wiphy_event_sync);
+	cfg->wiphy_events_stopped = true;
+	cfg->wiphy_event_generation++;
+	list_for_each_entry_safe(event, next, &cfg->wiphy_events, list) {
+		list_del(&event->list);
+		wl_free_wiphy_event(cfg, event);
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+#endif
+
 static s32 wl_create_event_handler(struct bcm_cfg80211 *cfg)
 {
 	int ret = 0;
@@ -16167,11 +16398,24 @@ static s32 wl_create_event_handler(struct bcm_cfg80211 *cfg)
 		INIT_WORK(&cfg->event_work, wl_event_handler);
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (!ret) {
+		mutex_lock(&cfg->wiphy_event_sync);
+		cfg->wiphy_event_generation++;
+		cfg->wiphy_events_stopped = false;
+		mutex_unlock(&cfg->wiphy_event_sync);
+	}
+#endif
 	return ret;
 }
 
 static void wl_destroy_event_handler(struct bcm_cfg80211 *cfg)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (cfg)
+		wl_stop_wiphy_events(cfg);
+#endif
+
 
 	if (cfg && cfg->event_workq) {
 		cancel_work_sync(&cfg->event_work);
@@ -16403,6 +16647,10 @@ wl_cfg80211_netdev_notifier_call(struct notifier_block * nb,
 			break;
 		}
 		case NETDEV_UNREGISTER:
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			wl_cfg80211_quiesce_wiphy_events(wdev);
+#endif
+
 			wl_cfg80211_clear_per_bss_ies(cfg, wdev);
 			/* after calling list_del_rcu(&wdev->list) */
 			wl_dealloc_netinfo_by_wdev(cfg, wdev);
@@ -17126,6 +17374,10 @@ void wl_cfg80211_detach(struct bcm_cfg80211 *cfg)
 	if (!cfg) {
 		return;
 	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_stop_wiphy_events(cfg);
+#endif
+
 /* clean up pm_enable work item. Remove this once deinit is properly
  * clean up and wl_cfg8021_down is called while removing the module
  */
