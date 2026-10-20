@@ -875,6 +875,11 @@ wl_cfg80211_handle_if_role_conflict(struct bcm_cfg80211 *cfg,
 {
 	s32 ret = BCME_OK;
 
+	/* RTNL serializes policy setters and host interface identity across close. */
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(bcmcfg_to_wiphy(cfg));
+	lockdep_assert_not_held(&cfg->if_sync);
+
 	WL_DBG_MEM(("Incoming iface = %s\n", wl_iftype_to_str(new_wl_iftype)));
 
 	if (!is_discovery_iface(new_wl_iftype)) {

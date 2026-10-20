@@ -815,11 +815,20 @@ wl_cfgp2p_enable_discovery(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	CFGP2P_DBG(("enter\n"));
 	mutex_lock(&cfg->if_sync);
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_P2P_DISC)) != BCME_OK) {
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_P2P_DISC);
+	mutex_lock(&cfg->if_sync);
+	if (ret != BCME_OK) {
 		WL_ERR(("secondary iface is active, p2p enable discovery is not supported\n"));
 		goto exit;
 	}
 #endif /* WL_IFACE_MGMT */
+
+	if (!wl_get_drv_status(cfg, READY, bcmcfg_to_prmry_ndev(cfg))) {
+		WL_ERR(("device stopped during interface policy\n"));
+		ret = -EIO;
+		goto exit;
+	}
 
 	if (wl_get_p2p_status(cfg, DISCOVERY_ON)) {
 		CFGP2P_DBG((" DISCOVERY is already initialized, we have nothing to do\n"));
