@@ -11291,7 +11291,7 @@ wl_cfg80211_cleanup_connection(struct net_device *net, bool user_enforced)
 #ifdef WL_NAN
 	if (wl_cfgnan_is_enabled(cfg)) {
 		mutex_lock(&cfg->if_sync);
-		ret = wl_cfgnan_check_nan_disable_pending(cfg, true, true);
+		ret = wl_cfgnan_check_nan_disable_pending(cfg, true);
 		mutex_unlock(&cfg->if_sync);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to disable nan, error[%d]\n", ret));
@@ -19396,7 +19396,7 @@ s32 wl_cfg80211_down(struct net_device *dev)
 	if (cfg) {
 #ifdef WL_NAN
 		mutex_lock(&cfg->if_sync);
-		wl_cfgnan_check_nan_disable_pending(cfg, true, false);
+		wl_cfgnan_check_nan_disable_pending(cfg, true);
 		mutex_unlock(&cfg->if_sync);
 #endif /* WL_NAN */
 

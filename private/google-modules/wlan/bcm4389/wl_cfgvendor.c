@@ -6731,7 +6731,7 @@ wl_cfgvendor_nan_start_handler(struct wiphy *wiphy,
 	}
 	NAN_DBG_ENTER();
 
-	ret = wl_cfgnan_check_nan_disable_pending(cfg, false, true);
+	ret = wl_cfgnan_check_nan_disable_pending(cfg, false);
 	if (ret != BCME_OK) {
 		WL_ERR(("failed to disable nan, error[%d]\n", ret));
 		goto exit;
@@ -6924,12 +6924,10 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 			*/
 			WL_INFORM_MEM(("Schedule Nan Disable Req with NAN_DISABLE_CMD_DELAY\n"));
 			delay_ms = NAN_DISABLE_CMD_DELAY;
-			DHD_NAN_WAKE_LOCK_TIMEOUT(cfg->pub, NAN_WAKELOCK_TIMEOUT);
 		} else {
 			delay_ms = 0;
 		}
-		schedule_delayed_work(&nancfg->nan_disable,
-			msecs_to_jiffies(delay_ms));
+		wl_cfgnan_schedule_disable(cfg, delay_ms);
 	}
 exit:
 	mutex_unlock(&cfg->if_sync);
