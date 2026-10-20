@@ -439,7 +439,14 @@ extern char *dhd_log_dump_get_timestamp(void);
  * MSM defined CFG80211_DISCONNECTED_V2 as the flag
  * when they uses different kernel/cfg version.
  */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)) || \
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+void wl_cfg80211_invalidate_wiphy_events(struct wireless_dev *wdev);
+#define CFG80211_DISCONNECTED(dev, reason, ie, len, loc_gen, gfp) \
+	do { \
+		wl_cfg80211_invalidate_wiphy_events((dev)->ieee80211_ptr); \
+		cfg80211_disconnected(dev, reason, ie, len, loc_gen, gfp); \
+	} while (0)
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)) || \
 	   (defined(CONFIG_ARCH_MSM) && defined(CFG80211_DISCONNECTED_V2))
 #define CFG80211_DISCONNECTED(dev, reason, ie, len, loc_gen, gfp) \
 	cfg80211_disconnected(dev, reason, ie, len, loc_gen, gfp);
@@ -1438,6 +1445,10 @@ typedef struct wl_chan_info {
 } wl_chan_info_t;
 
 struct net_info {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	u64 association_generation; /* protected by net_list_sync */
+	u64 link_generation[IEEE80211_MLD_MAX_NUM_LINKS];
+#endif
 	struct net_device *ndev;
 	struct wireless_dev *wdev;
 	struct wl_profile profile;
@@ -2122,6 +2133,23 @@ typedef enum cfg80211_feature_list {
 
 
 /* private data of cfg80211 interface */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+struct wl_wiphy_event;
+typedef void (*wl_wiphy_event_func_t)(struct wiphy *, struct wl_wiphy_event *);
+
+struct wl_wiphy_event {
+	struct list_head list;
+	wl_wiphy_event_func_t deliver;
+	u64 generation;
+	u64 association_generation;
+	u64 link_generation;
+	int link_id;
+	bool wake_held;
+	u32 wdev_id;
+	enum nl80211_iftype iftype;
+};
+#endif
+
 struct bcm_cfg80211 {
 	struct wireless_dev *wdev;	/* representing cfg cfg80211 device */
 
@@ -2141,6 +2169,14 @@ struct bcm_cfg80211 {
 	struct completion wait_next_af;
 	struct mutex usr_sync;	/* maily for up/down synchronization */
 	struct mutex if_sync;	/* maily for iface op synchronization */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Never acquire if_sync or wiphy mutex while holding this mutex. */
+	struct mutex wiphy_event_sync;
+	struct wiphy_work wiphy_event_work;
+	struct list_head wiphy_events;
+	u64 wiphy_event_generation;
+	bool wiphy_events_stopped;
+#endif
 	struct mutex scan_sync;	/* scan sync from different scan contexts  */
 	wl_scan_results_v109_t *bss_list;
 	wl_scan_results_v109_t *scan_results;
@@ -2463,6 +2499,49 @@ struct bcm_cfg80211 {
 	u8 feature_mask[CFG80211_FEAT_MAX_LEN];
 	bool feature_mask_init_done;
 };
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+s32 wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	struct wl_wiphy_event *event, wl_wiphy_event_func_t func);
+
+/* The native wiphy mutex protects registration and the returned device. */
+static inline struct wireless_dev *
+wl_cfg80211_event_wdev(struct wiphy *wiphy, const struct wl_wiphy_event *event)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct wireless_dev *wdev;
+	struct net_info *info;
+	unsigned long flags;
+	bool matches;
+
+	lockdep_assert_held(&wiphy->mtx);
+	lockdep_assert_held(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped || event->generation != cfg->wiphy_event_generation)
+		return NULL;
+
+	list_for_each_entry(wdev, &wiphy->wdev_list, list) {
+		if (wdev->identifier != event->wdev_id || !wdev->registered ||
+			!wdev->netdev || wdev->iftype != event->iftype)
+			continue;
+
+		matches = false;
+		spin_lock_irqsave(&cfg->net_list_sync, flags);
+		list_for_each_entry(info, &cfg->net_list, list) {
+			if (info->wdev == wdev) {
+				matches = info->association_generation ==
+					event->association_generation;
+				if (matches && event->link_id >= 0)
+					matches = info->link_generation[event->link_id] ==
+						event->link_generation;
+				break;
+			}
+		}
+		spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+		return matches ? wdev : NULL;
+	}
+	return NULL;
+}
+#endif
 
 typedef struct wl_multink_config {
 	uint16	id;

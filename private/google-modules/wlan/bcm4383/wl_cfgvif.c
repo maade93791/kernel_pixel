@@ -1387,6 +1387,9 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 	}
 
 	mutex_lock(&cfg->if_sync);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 
 	netinfo = wl_get_netinfo_by_wdev(cfg, ndev->ieee80211_ptr);
 	if (!netinfo) {
@@ -4587,6 +4590,9 @@ wl_cfg80211_start_ap(
 	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
 #endif /* BCMDONGLEHOST */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+#endif
 	WL_DBG(("Enter \n"));
 
 	if ((bssidx = wl_get_bssidx_by_wdev(cfg, dev->ieee80211_ptr)) < 0) {
@@ -4838,14 +4844,25 @@ wl_cfg80211_stop_ap(
 		return (-ENODEV);
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Serialize cache invalidation and cancellation with FW CSA production. */
+	mutex_lock(&cfg->if_sync);
+#endif
 	wl_clr_drv_status(cfg, AP_CREATING, dev);
 	wl_clr_drv_status(cfg, AP_BSS_UP_IN_PROG, dev);
 	wl_clr_drv_status(cfg, AP_CREATED, dev);
 	netinfo = wl_get_netinfo_by_wdev(cfg, dev->ieee80211_ptr);
 	if (!netinfo) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		mutex_unlock(&cfg->if_sync);
+#endif
 		return (-ENODEV);
 	}
 	netinfo->ap_chanspec = INVCHANSPEC;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+	mutex_unlock(&cfg->if_sync);
+#endif
 
 	if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
 		dev_role = NL80211_IFTYPE_AP;
@@ -6682,7 +6699,17 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec,
 	}
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))
 	freq = chandef.chan ? chandef.chan->center_freq : chandef.center_freq1;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	{
+		int err;
+
+		err = cfg80211_ch_switch_notify_queued(dev, &chandef, link_id, GFP_KERNEL);
+		if (err) {
+			WL_ERR(("Channel switch notification queue failed: %d\n", err));
+			return;
+		}
+	}
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0))
 	cfg80211_ch_switch_notify(dev, &chandef, 0);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) || defined(WL_CH_SWITCH_BKPORT)
 	/* FIXME: need to consider puncturing bitmap */
