@@ -12938,6 +12938,10 @@ static s32 wl_setup_wiphy(struct wireless_dev *wdev, struct device *sdiofunc_dev
 #else
 	wdev->wiphy->flags &= ~WIPHY_FLAG_PS_ON_BY_DEFAULT;
 #endif				/* !WL_POWERSAVE_DISABLED */
+#ifdef WL_IFACE_MGMT
+	/* Discovery policy can synchronously remove a conflicting host interface. */
+	wdev->wiphy->flags |= WIPHY_FLAG_DISCOVERY_NEEDS_RTNL;
+#endif
 	wdev->wiphy->flags |= WIPHY_FLAG_NETNS_OK |
 		WIPHY_FLAG_4ADDR_AP |
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 39)) && \

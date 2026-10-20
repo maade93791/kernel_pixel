@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/overflow.h>
+#include <linux/rtnetlink.h>
 #include <net/netlink.h>
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
@@ -8978,7 +8979,7 @@ wl_cfg80211_p2plo_deinit(struct bcm_cfg80211 *cfg)
 	return  ret;
 }
 
-s32
+static s32
 wl_cfg80211_p2plo_listen_start(struct net_device *dev, u8 *buf, int len)
 {
 	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
@@ -8989,6 +8990,8 @@ wl_cfg80211_p2plo_listen_start(struct net_device *dev, u8 *buf, int len)
 	int period = 0;
 	int interval = 0;
 	int count = 0;
+	ASSERT_RTNL();
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
 	if (WL_DRV_STATUS_SENDING_AF_FRM_EXT(cfg)) {
 		WL_ERR(("Sending Action Frames. Try it again.\n"));
 		goto exit;
@@ -9054,6 +9057,7 @@ wl_cfg80211_p2plo_listen_start(struct net_device *dev, u8 *buf, int len)
 
 	wl_set_p2p_status(cfg, DISC_IN_PROGRESS);
 exit :
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
 	return ret;
 }
 
