@@ -667,6 +667,10 @@ static int wl_cfg80211_update_owe_info(struct wiphy *wiphy, struct net_device *d
  */
 static s32 wl_create_event_handler(struct bcm_cfg80211 *cfg);
 static void wl_destroy_event_handler(struct bcm_cfg80211 *cfg);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void wl_stop_wiphy_events(struct bcm_cfg80211 *cfg);
+static void wl_wiphy_event_work(struct wiphy *wiphy, struct wiphy_work *work);
+#endif
 static void wl_event_handler(struct work_struct *work_data);
 static void wl_init_eq(struct bcm_cfg80211 *cfg);
 static void wl_flush_eq(struct bcm_cfg80211 *cfg);
@@ -4457,6 +4461,9 @@ wl_cfg80211_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 	size_t join_params_size;
 	chanspec_t chanspec = 0;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+#endif
 	WL_TRACE(("In\n"));
 	RETURN_EIO_IF_NOT_UP(cfg);
 	WL_INFORM_MEM(("IBSS JOIN BSSID:" MACDBG "\n", MAC2STRDBG(params->bssid)));
@@ -4620,6 +4627,9 @@ static s32 wl_cfg80211_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 	scb_val_t scbval;
 	u8 *curbssid;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+#endif
 	RETURN_EIO_IF_NOT_UP(cfg);
 	wl_link_down(cfg);
 
@@ -6508,6 +6518,9 @@ wl_cfg80211_get_mld_ndev(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev)
 {
 	struct net_info *netinfo;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(wdev);
+#endif
 	netinfo = wl_get_netinfo_by_wdev(cfg, wdev);
 	if (!netinfo) {
 		WL_ERR(("netinfo not found!\n"));
@@ -6577,6 +6590,12 @@ _wl_cfg80211_ml_link_add(struct bcm_cfg80211 *cfg, struct net_info *mld_netinfo,
 		return BCME_ERROR;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Callers hold net_list_sync while replacing the complete link map. */
+	if (mld_netinfo->wdev && mld_netinfo->wdev->identifier)
+		cfg80211_ch_switch_notify_cancel(mld_netinfo->wdev, -1);
+	mld_netinfo->association_generation++;
+#endif
 	/* Clear ml link data on new link add event in case of obsolete data */
 	if (mld_netinfo->mlinfo.num_links) {
 		WL_DBG_MEM(("Clear existing ml link data. num_links:%d\n",
@@ -6732,6 +6751,14 @@ wl_cfg80211_ml_link_del(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
 					(ml_link->cfg_idx == link->cfg_idx)) {
 				WL_DBG(("matching link found for ifidx:%d bsscfgidx:%d\n",
 					link->if_idx, link->cfg_idx));
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				if (ml_link->link_id < IEEE80211_MLD_MAX_NUM_LINKS) {
+					if (mld_netinfo->wdev && mld_netinfo->wdev->identifier)
+						cfg80211_ch_switch_notify_cancel(mld_netinfo->wdev,
+							ml_link->link_id);
+					mld_netinfo->link_generation[ml_link->link_id]++;
+				}
+#endif
 				(void)memset_s(ml_link, sizeof(wl_mlo_link_t), 0,
 					sizeof(wl_mlo_link_t));
 				mld_netinfo->mlinfo.num_links--;
@@ -7947,6 +7974,9 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2) */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+#endif
 	WL_DBG(("Enter len=%zu\n", sme->ie_len));
 	RETURN_EIO_IF_NOT_UP(cfg);
 
@@ -8138,6 +8168,9 @@ wl_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 #ifdef WL_CFGVENDOR_CUST_ADVLOG
 	scb_val_t scb_rssi;
 #endif /* WL_CFGVENDOR_CUST_ADVLOG */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(wdev);
+#endif
 	RETURN_EIO_IF_NOT_UP(cfg);
 
 #ifdef BCMDONGLEHOST
@@ -13035,6 +13068,16 @@ static s32 wl_setup_wiphy(struct wireless_dev *wdev, struct device *sdiofunc_dev
 		err = -ENOMEM;
 		return err;
 	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	{
+		struct bcm_cfg80211 *cfg = wiphy_priv(wdev->wiphy);
+
+		mutex_init(&cfg->wiphy_event_sync);
+		INIT_LIST_HEAD(&cfg->wiphy_events);
+		wiphy_work_init(&cfg->wiphy_event_work, wl_wiphy_event_work);
+		cfg->wiphy_events_stopped = true;
+	}
+#endif
 	set_wiphy_dev(wdev->wiphy, sdiofunc_dev);
 	wdev->wiphy->max_scan_ie_len = WL_SCAN_IE_LEN_MAX;
 	/* Report  how many SSIDs Driver can support per Scan request */
@@ -13321,6 +13364,9 @@ static void wl_free_wdev(struct bcm_cfg80211 *cfg)
 		return;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_stop_wiphy_events(cfg);
+#endif
 	ndev = wdev->netdev;
 	if (wdev->wiphy) {
 		wiphy = wdev->wiphy;
@@ -16851,6 +16897,9 @@ wl_bss_roaming_done(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	/* Update channel info for debuggability */
 	wl_connected_channel_debuggability(cfg, ndev);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 	cfg80211_roamed(ndev, &roam_info, GFP_KERNEL);
 #else
 	cfg80211_roamed(ndev,
@@ -17206,6 +17255,10 @@ wl_bss_connect_done(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 		memcpy(curbssid, conn_req_bssid, ETHER_ADDR_LEN);
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (!completed)
+		wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 	wl_cfgscan_cancel_scan(cfg);
 	bzero(&cfg->last_roamed_addr, ETHER_ADDR_LEN);
 
@@ -18356,6 +18409,114 @@ static void wl_deinit_priv_mem(struct bcm_cfg80211 *cfg)
 
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static void wl_free_wiphy_event(struct bcm_cfg80211 *cfg, struct wl_wiphy_event *event)
+{
+	if (event->wake_held)
+		DHD_OS_WAKE_UNLOCK(cfg->pub);
+	kfree(event);
+}
+
+static void wl_wiphy_event_work(struct wiphy *wiphy, struct wiphy_work *work)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct wl_wiphy_event *event;
+
+	mutex_lock(&cfg->wiphy_event_sync);
+	while (!list_empty(&cfg->wiphy_events)) {
+		event = list_first_entry(&cfg->wiphy_events, struct wl_wiphy_event, list);
+		list_del(&event->list);
+		event->deliver(wiphy, event);
+		wl_free_wiphy_event(cfg, event);
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+
+void wl_cfg80211_invalidate_wiphy_events(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_info *info;
+	unsigned long flags;
+
+	if (!wdev)
+		return;
+	cfg = wiphy_priv(wdev->wiphy);
+	/* Also called by the atomic WPS disconnect-indication path. */
+	if (wdev->identifier)
+		cfg80211_ch_switch_notify_cancel(wdev, -1);
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			info->association_generation++;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+}
+
+s32
+wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	struct wl_wiphy_event *event, wl_wiphy_event_func_t func)
+{
+	struct net_info *info;
+	unsigned long flags;
+	int err = -ENODEV;
+
+	/* Callers hold if_sync while consuming the firmware event. */
+	if (!wdev->identifier)
+		return -ENODEV;
+	if (event->link_id >= IEEE80211_MLD_MAX_NUM_LINKS)
+		return -EINVAL;
+
+	event->wdev_id = wdev->identifier;
+	event->iftype = wdev->iftype;
+	event->deliver = func;
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			event->association_generation = info->association_generation;
+			if (event->link_id >= 0)
+				event->link_generation = info->link_generation[event->link_id];
+			err = 0;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	if (err)
+		return err;
+
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped) {
+		err = -ENODEV;
+	} else {
+		event->generation = cfg->wiphy_event_generation;
+#ifdef BCMDONGLEHOST
+		/* The event wake source itself does not support nested references. */
+		event->wake_held = dhd_os_wake_lock(cfg->pub) > 0;
+#endif
+		list_add_tail(&event->list, &cfg->wiphy_events);
+		wiphy_work_queue(wdev->wiphy, &cfg->wiphy_event_work);
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+	return err;
+}
+
+static void wl_stop_wiphy_events(struct bcm_cfg80211 *cfg)
+{
+	struct wl_wiphy_event *event, *next;
+
+	/* Wait for any firmware-facing callback before its resources are freed. */
+	mutex_lock(&cfg->wiphy_event_sync);
+	cfg->wiphy_events_stopped = true;
+	cfg->wiphy_event_generation++;
+	list_for_each_entry_safe(event, next, &cfg->wiphy_events, list) {
+		list_del(&event->list);
+		wl_free_wiphy_event(cfg, event);
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+#endif
+
 static s32 wl_create_event_handler(struct bcm_cfg80211 *cfg)
 {
 	int ret = 0;
@@ -18384,11 +18545,23 @@ static s32 wl_create_event_handler(struct bcm_cfg80211 *cfg)
 		INIT_WORK(&cfg->event_work, wl_event_handler);
 		cfg->event_workq_init = true;
 #endif /* OEM_ANDROID */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (!ret) {
+		mutex_lock(&cfg->wiphy_event_sync);
+		cfg->wiphy_event_generation++;
+		cfg->wiphy_events_stopped = false;
+		mutex_unlock(&cfg->wiphy_event_sync);
+	}
+#endif
 	return ret;
 }
 
 static void wl_destroy_event_handler(struct bcm_cfg80211 *cfg)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (cfg)
+		wl_stop_wiphy_events(cfg);
+#endif
 
 #ifdef OEM_ANDROID
 	if (cfg && cfg->event_workq) {
@@ -19018,6 +19191,9 @@ static s32 wl_init_priv(struct bcm_cfg80211 *cfg)
 
 static void wl_deinit_priv(struct bcm_cfg80211 *cfg)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_stop_wiphy_events(cfg);
+#endif
 	DNGL_FUNC(dhd_cfg80211_deinit, (cfg));
 	wl_destroy_event_handler(cfg);
 	wl_flush_eq(cfg);
@@ -19349,6 +19525,9 @@ void wl_cfg80211_detach(struct bcm_cfg80211 *cfg)
 	if (!cfg) {
 		return;
 	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_stop_wiphy_events(cfg);
+#endif
 /* clean up pm_enable work item. Remove this once deinit is properly
  * clean up and wl_cfg8021_down is called while removing the module
  */
