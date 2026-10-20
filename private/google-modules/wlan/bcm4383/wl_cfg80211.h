@@ -3703,8 +3703,11 @@ extern s32 wl_cfg80211_get_connect_failed_status(struct net_device *dev, char* c
 #endif /* DHD_ENABLE_BIGDATA_LOGGING */
 extern struct bcm_cfg80211 *wl_get_cfg(struct net_device *ndev);
 extern s32 wl_cfg80211_set_if_band(struct net_device *ndev, int band);
+/* RTNL-only entry and RTNL+wiphy entry, respectively. */
 extern s32 wl_cfg80211_set_country_code(struct net_device *dev, char *country_code,
         bool notify, bool user_enforced, int revinfo);
+s32 wl_cfg80211_set_country_code_locked(struct net_device *dev, char *country_code,
+	bool notify, bool user_enforced, int revinfo);
 extern uint8 wl_cfg80211_is_hal_started(struct bcm_cfg80211 *cfg);
 #ifdef WL_WIPSEVT
 extern int wl_cfg80211_wips_event(uint16 misdeauth, char* bssid);
