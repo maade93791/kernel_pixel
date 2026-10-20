@@ -6744,7 +6744,8 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec,
 	{
 		int err;
 
-		err = cfg80211_ch_switch_notify_queued(dev, &chandef, link_id, GFP_KERNEL);
+		err = wl_cfg80211_queue_ch_switch_event(wiphy_priv(wiphy), dev->ieee80211_ptr,
+			&chandef, link_id);
 		if (err) {
 			WL_ERR(("Channel switch notification queue failed: %d\n", err));
 			return;
