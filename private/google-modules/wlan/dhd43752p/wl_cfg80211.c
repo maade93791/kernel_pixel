@@ -2389,7 +2389,7 @@ wl_cfg80211_p2p_if_del(struct wiphy *wiphy, struct wireless_dev *wdev)
 #ifdef WL_CFG80211_P2P_DEV_IF
 	if (wdev->iftype == NL80211_IFTYPE_P2P_DEVICE) {
 		/* Handle dedicated P2P discovery interface. */
-		return wl_cfgp2p_del_p2p_disc_if(wdev, cfg);
+		return wl_cfgp2p_del_p2p_disc_if_locked(wdev, cfg);
 	}
 #endif /* WL_CFG80211_P2P_DEV_IF */
 
@@ -17365,6 +17365,10 @@ void wl_cfg80211_detach(struct bcm_cfg80211 *cfg)
 #ifdef WL_STATIC_IF
 	wl_cfg80211_unregister_static_if(cfg);
 #endif /* WL_STATIC_IF */
+#if defined(WL_CFG80211_P2P_DEV_IF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (cfg->p2p_wdev)
+		wl_cfgp2p_del_p2p_disc_if(cfg->p2p_wdev, cfg);
+#endif
 #if defined(WL_ENABLE_P2P_IF) || defined (WL_NEWCFG_PRIVCMD_SUPPORT)
 	wl_cfg80211_detach_p2p(cfg);
 #endif /* WL_ENABLE_P2P_IF || WL_NEWCFG_PRIVCMD_SUPPORT */
@@ -19221,7 +19225,18 @@ static s32 __wl_cfg80211_down(struct bcm_cfg80211 *cfg)
 		if (timer_pending(&cfg->p2p->listen_timer)) {
 			timer_delete_sync(&cfg->p2p->listen_timer);
 		}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		/* RTNL stays owned; close native P2P without usr_sync inversion. */
+		mutex_unlock(&cfg->usr_sync);
+		wiphy_lock(bcmcfg_to_wiphy(cfg));
+		mutex_lock(&cfg->if_sync);
 		wl_cfgp2p_down(cfg);
+		mutex_unlock(&cfg->if_sync);
+		wiphy_unlock(bcmcfg_to_wiphy(cfg));
+		mutex_lock(&cfg->usr_sync);
+#else
+		wl_cfgp2p_down(cfg);
+#endif
 	}
 
 	timer_delete_sync(&cfg->scan_timeout);

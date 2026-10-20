@@ -2002,7 +2002,7 @@ wl_cfgp2p_down(struct bcm_cfg80211 *cfg)
 	if (cfg->p2p_wdev) {
 		/* If p2p wdev is left out, clean it up */
 		WL_ERR(("Clean up the p2p discovery IF\n"));
-		wl_cfgp2p_del_p2p_disc_if(cfg->p2p_wdev, cfg);
+		wl_cfgp2p_del_p2p_disc_if_locked(cfg->p2p_wdev, cfg);
 	}
 #endif /* WL_CFG80211_P2P_DEV_IF !defined(KEEP_WIFION_OPTION) */
 
@@ -2641,6 +2641,12 @@ wl_cfgp2p_add_p2p_disc_if(struct bcm_cfg80211 *cfg)
 
 	if (!cfg || !cfg->p2p_supported)
 		return ERR_PTR(-EINVAL);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* nl80211 initializes/registers this netless wdev after our return. */
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(bcmcfg_to_wiphy(cfg));
+	lockdep_assert_held(&cfg->if_sync);
+#endif
 
 	WL_TRACE(("Enter\n"));
 
@@ -2667,7 +2673,7 @@ wl_cfgp2p_add_p2p_disc_if(struct bcm_cfg80211 *cfg)
 		 * even after ifconfig wlan0 down. So delete the iface
 		 * first and then indicate the HANG event
 		 */
-		wl_cfgp2p_del_p2p_disc_if(cfg->p2p_wdev, cfg);
+		wl_cfgp2p_del_p2p_disc_if_locked(cfg->p2p_wdev, cfg);
 #else
 		dhd->hang_reason = HANG_REASON_IFACE_DEL_FAILURE;
 
@@ -2803,15 +2809,28 @@ wl_cfgp2p_stop_p2p_device(struct wiphy *wiphy, struct wireless_dev *wdev)
 }
 
 int
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+wl_cfgp2p_del_p2p_disc_if_locked(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
+#else
 wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
+#endif
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0))
 	bool rollback_lock = false;
+#endif
 
 	if (!wdev || !cfg) {
 		WL_ERR(("wdev or cfg is NULL\n"));
 		return -EINVAL;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(bcmcfg_to_wiphy(cfg));
+	lockdep_assert_held(&cfg->if_sync);
+	if (wdev != cfg->p2p_wdev)
+		return -EINVAL;
+#endif
 	WL_INFORM(("Enter\n"));
 
 	if (!cfg->p2p_wdev) {
@@ -2828,6 +2847,11 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 		CFGP2P_ERR(("p2p disable disc failed\n"));
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* A failed create may never have returned to the native registrar. */
+	if (wdev->registered)
+		cfg80211_unregister_wdev(wdev);
+#else
 	if (!rtnl_is_locked()) {
 		rtnl_lock();
 		rollback_lock = true;
@@ -2837,6 +2861,7 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 
 	if (rollback_lock)
 		rtnl_unlock();
+#endif
 
 	synchronize_rcu();
 
@@ -2848,6 +2873,25 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 
 	return 0;
 }
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/* Process-owned entry; caller pins cfg and holds no native/private mutex. */
+int wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
+{
+	int ret;
+
+	if (!cfg)
+		return -EINVAL;
+	rtnl_lock();
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
+	mutex_lock(&cfg->if_sync);
+	ret = wl_cfgp2p_del_p2p_disc_if_locked(wdev, cfg);
+	mutex_unlock(&cfg->if_sync);
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
+	rtnl_unlock();
+	return ret;
+}
+#endif
 #endif /* WL_CFG80211_P2P_DEV_IF */
 
 void

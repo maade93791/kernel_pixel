@@ -481,6 +481,13 @@ wl_cfgp2p_stop_p2p_device(struct wiphy *wiphy, struct wireless_dev *wdev);
 
 extern int
 wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/* Caller owns RTNL, wiphy and if_sync. */
+extern int wl_cfgp2p_del_p2p_disc_if_locked(struct wireless_dev *wdev,
+					struct bcm_cfg80211 *cfg);
+#else
+#define wl_cfgp2p_del_p2p_disc_if_locked wl_cfgp2p_del_p2p_disc_if
+#endif
 
 #endif /* WL_CFG80211_P2P_DEV_IF */
 
