@@ -9268,7 +9268,7 @@ dhd_stop(struct net_device *net)
 	bool skip_reset = false;
 #ifdef WL_CFG80211
 	unsigned long flags = 0;
-#ifdef WL_STATIC_IF
+#if defined(WL_STATIC_IF) || (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 	struct bcm_cfg80211 *cfg = wl_get_cfg(net);
 #endif /* WL_STATIC_IF */
 #endif /* WL_CFG80211 */
@@ -9335,6 +9335,10 @@ dhd_stop(struct net_device *net)
 		dhd->pub.up = 0;
 		DHD_UP_UNLOCK(&dhd->pub.up_lock, flags);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		/* The deferred-work join below must never wait for an RTNL waiter. */
+		WRITE_ONCE(dhd->if_lifecycle_draining, true);
+#endif
 		if (!dhd_download_fw_on_driverload) {
 			wl_terminate_event_handler(net);
 		}
@@ -9366,6 +9370,23 @@ dhd_stop(struct net_device *net)
 				dhd_dump_pkt_clear(&dhd->pub);
 #endif /* DHD_PKTDUMP_ROAM */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				/* RTNL is owned; persistent static netdevs stay registered. */
+				for (i = 1; i < DHD_MAX_IFS; i++) {
+					struct net_device *vif = dhd->iflist[i] ?
+						dhd->iflist[i]->net : NULL;
+
+					if (!vif || vif->reg_state != NETREG_REGISTERED ||
+					    !(vif->flags & IFF_UP))
+						continue;
+#ifdef WL_STATIC_IF
+					if (IS_CFG80211_STATIC_IF(cfg, vif))
+						continue;
+#endif
+					dev_close(vif);
+				}
+				wiphy_lock(bcmcfg_to_wiphy(cfg));
+#endif
 				dhd_net_if_lock_local(dhd);
 				for (i = 1; i < DHD_MAX_IFS; i++)
 					dhd_remove_if(&dhd->pub, i, FALSE);
@@ -9386,6 +9407,9 @@ dhd_stop(struct net_device *net)
 				}
 #endif /* CONFIG_IPV6 && IPV6_NDO_SUPPORT */
 				dhd_net_if_unlock_local(dhd);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				wiphy_unlock(bcmcfg_to_wiphy(cfg));
+#endif
 			}
 			cancel_work_sync(dhd->dhd_deferred_wq);
 
@@ -9475,6 +9499,9 @@ dhd_stop(struct net_device *net)
 
 	OLD_MOD_DEC_USE_COUNT;
 exit:
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	WRITE_ONCE(dhd->if_lifecycle_draining, false);
+#endif
 	if (skip_reset == false) {
 #if defined(WL_CFG80211) && defined(OEM_ANDROID)
 		if (ifidx == 0 && !dhd_download_fw_on_driverload) {
@@ -17229,6 +17256,10 @@ void dhd_detach(dhd_pub_t *dhdp)
 	int timer_valid = FALSE;
 	struct net_device *dev = NULL;
 	dhd_if_t *ifp;
+	bool need_rtnl_lock = true;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *detach_wiphy = NULL;
+#endif
 #ifdef WL_CFG80211
 	struct bcm_cfg80211 *cfg = NULL;
 #endif
@@ -17238,6 +17269,20 @@ void dhd_detach(dhd_pub_t *dhdp)
 	dhd = (dhd_info_t *)dhdp->info;
 	if (!dhd)
 		return;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Bus removal/attach rollback enters without RTNL or private mutexes. */
+	WRITE_ONCE(dhd->if_lifecycle_stopping, true);
+	if (dhd->dhd_state & DHD_ATTACH_STATE_CFG80211) {
+#ifdef WL_NAN
+		if (dhd->iflist[0] && dhd->iflist[0]->net &&
+		    dhd->iflist[0]->net->ieee80211_ptr)
+			wl_cfgnan_quiesce_disable(wl_get_cfg(dhd->iflist[0]->net));
+#endif
+		/* Drain a lifecycle transition that passed admission before stop. */
+		rtnl_lock();
+		rtnl_unlock();
+	}
+#endif
 
 #if defined(GDB_PROXY) && defined(PCIE_FULL_DONGLE) && defined(BCMINTERNAL)
 	gdb_proxy_fs_remove(dhd);
@@ -17358,11 +17403,30 @@ void dhd_detach(dhd_pub_t *dhdp)
 	if (dhd->dhd_state & DHD_ATTACH_STATE_ADD_IF) {
 		int i = 1;
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		/* Close first: ndo_stop may acquire private locks and enter cfg80211. */
+		rtnl_lock();
+		if (ifp && ifp->net && ifp->net->ieee80211_ptr) {
+			detach_wiphy = ifp->net->ieee80211_ptr->wiphy;
+			for (i = 0; i < ARRAY_SIZE(dhd->iflist); i++) {
+				struct net_device *net = dhd->iflist[i] ?
+					dhd->iflist[i]->net : NULL;
+
+				if (net && net->reg_state == NETREG_REGISTERED &&
+				    (net->flags & IFF_UP))
+					dev_close(net);
+			}
+			wiphy_lock(detach_wiphy);
+			need_rtnl_lock = false;
+		} else {
+			rtnl_unlock();
+		}
+#endif
 		/* Cleanup virtual interfaces */
 		dhd_net_if_lock_local(dhd);
 		for (i = 1; i < DHD_MAX_IFS; i++) {
 			if (dhd->iflist[i]) {
-				dhd_remove_if(&dhd->pub, i, TRUE);
+				dhd_remove_if(&dhd->pub, i, need_rtnl_lock);
 			}
 		}
 		dhd_net_if_unlock_local(dhd);
@@ -17384,7 +17448,7 @@ void dhd_detach(dhd_pub_t *dhdp)
 				free_netdev(ifp->net);
 			} else {
 				netif_tx_disable(ifp->net);
-				dhd_unregister_net(ifp->net, true);
+				dhd_unregister_net(ifp->net, need_rtnl_lock);
 			}
 #ifdef PCIE_FULL_DONGLE
 			ifp->net = DHD_NET_DEV_NULL;
@@ -17419,6 +17483,13 @@ void dhd_detach(dhd_pub_t *dhdp)
 			ifp = NULL;
 		}
 	}
+
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (detach_wiphy) {
+		wiphy_unlock(detach_wiphy);
+		rtnl_unlock();
+	}
+#endif
 
 	/* Clear the watchdog timer */
 	DHD_GENERAL_LOCK(&dhd->pub, flags);
