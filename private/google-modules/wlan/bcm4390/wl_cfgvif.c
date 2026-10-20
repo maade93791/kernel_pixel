@@ -242,12 +242,33 @@ bool wl_cfg80211_is_oce_ap(struct wiphy *wiphy, const u8 *bssid_hint)
 #endif /* WL_FW_OCE_AP_SELECT */
 
 s32
-wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+wl_cfgvif_del_if_locked(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *ifname)
 {
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	struct net_device *target = wdev ? wdev->netdev : NULL;
+	bool close_target = true;
 	int ret = BCME_OK;
 	struct net_info *iter, *next;
 	bool active_iface = FALSE;
+
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(wiphy);
+	if (!target && ifname)
+		target = wl_get_netdev_by_name(cfg, ifname);
+#ifdef WL_STATIC_IF
+	/* Static close only removes its firmware interface; avoid ndo_stop recursion. */
+	if (target && (IS_CFG80211_STATIC_IF(cfg, target) || IS_NMI_IFACE(target->name)))
+		close_target = false;
+#endif
+	if (target && close_target && (target->flags & IFF_UP)) {
+		/* NETDEV_GOING_DOWN/DOWN acquire wiphy themselves. */
+		dev_hold(target);
+		wiphy_unlock(wiphy);
+		dev_close(target);
+		wiphy_lock(wiphy);
+		dev_put(target);
+	}
 
 	mutex_lock(&cfg->if_sync);
 	ret = _wl_cfg80211_del_if(cfg, primary_ndev, wdev, ifname);
@@ -281,10 +302,27 @@ wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 
 		if (active_iface == FALSE) {
 			WL_INFORM(("Calling dhd_stop as all interfaces are down\n"));
+			wiphy_unlock(wiphy);
 			dhd_stop(primary_ndev);
+			wiphy_lock(wiphy);
 		}
 	}
 
+	return ret;
+}
+
+/* Android IOCTL and static ndo_stop callers own RTNL, but not wiphy. */
+s32
+wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+	struct wireless_dev *wdev, char *ifname)
+{
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	int ret;
+
+	ASSERT_RTNL();
+	wiphy_lock(wiphy);
+	ret = wl_cfgvif_del_if_locked(cfg, primary_ndev, wdev, ifname);
+	wiphy_unlock(wiphy);
 	return ret;
 }
 
@@ -1227,10 +1265,10 @@ wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 #endif /* WL_NAN */
 		dhd_set_del_in_progress(dhdp, ndev);
 	}
-	if ((ret = wl_cfgvif_del_if(cfg, primary_ndev,
-			wdev, NULL)) < 0) {
+	ret = wl_cfgvif_del_if_locked(cfg, primary_ndev, wdev, NULL);
+	if (ret < 0)
 		WL_ERR(("IF del failed\n"));
-	}
+
 	if (ndev) {
 		dhd_clear_del_in_progress(dhdp, ndev);
 	}

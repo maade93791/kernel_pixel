@@ -9139,7 +9139,7 @@ wl_cfgnan_data_path_iface_create_delete_handler(struct net_device *ndev,
 			 */
 			wl_cfgnan_add_ndi_data(cfg, idx, ifname, wdev);
 		} else if (type == NAN_WIFI_SUBCMD_DATA_PATH_IFACE_DELETE) {
-			ret = wl_cfgvif_del_if(cfg, ndev, NULL, ifname);
+			ret = wl_cfgvif_del_if_locked(cfg, ndev, NULL, ifname);
 			if (ret == BCME_OK) {
 				/* handled the post del ndi ops in _wl_cfg80211_del_if */
 			} else if (ret == -ENODEV) {

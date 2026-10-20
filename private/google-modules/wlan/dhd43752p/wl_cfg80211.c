@@ -2840,13 +2840,54 @@ wl_cfg80211_add_if(struct bcm_cfg80211 *cfg,
 }
 
 s32
-wl_cfg80211_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+wl_cfg80211_del_if_locked(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *ifname)
 {
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	struct net_device *target = wdev ? wdev->netdev : NULL;
+	bool close_target = true;
 	int ret = BCME_OK;
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(wiphy);
+	if (!target && ifname)
+		target = wl_get_netdev_by_name(cfg, ifname);
+#ifdef WL_STATIC_IF
+	/* Static close only removes its firmware interface; avoid ndo_stop recursion. */
+	if (target && IS_CFG80211_STATIC_IF(cfg, target))
+		close_target = false;
+#endif
+#ifdef WL_NMI_IF
+	/* The persistent NMI netdev has no firmware interface slot. */
+	if (target && target == cfg->nmi_ndev)
+		close_target = false;
+#endif
+	if (target && close_target && (target->flags & IFF_UP)) {
+		/* NETDEV_GOING_DOWN/DOWN acquire wiphy themselves. */
+		dev_hold(target);
+		wiphy_unlock(wiphy);
+		dev_close(target);
+		wiphy_lock(wiphy);
+		dev_put(target);
+	}
+
 	mutex_lock(&cfg->if_sync);
 	ret = _wl_cfg80211_del_if(cfg, primary_ndev, wdev, ifname);
 	mutex_unlock(&cfg->if_sync);
+	return ret;
+}
+
+/* Android IOCTL and static ndo_stop callers own RTNL, but not wiphy. */
+s32
+wl_cfg80211_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+	struct wireless_dev *wdev, char *ifname)
+{
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	int ret;
+
+	ASSERT_RTNL();
+	wiphy_lock(wiphy);
+	ret = wl_cfg80211_del_if_locked(cfg, primary_ndev, wdev, ifname);
+	wiphy_unlock(wiphy);
 	return ret;
 }
 

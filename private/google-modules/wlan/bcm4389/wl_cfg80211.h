@@ -3531,7 +3531,10 @@ int wl_get_rssi_per_ant(struct net_device *dev, char *ifname, char *peer_mac, vo
 #endif /* SUPPORT_RSSI_SUM_REPORT */
 struct wireless_dev * wl_cfg80211_add_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	wl_iftype_t wl_iftype, const char *name, const u8 *mac);
+/* RTNL-only entry and RTNL+wiphy entry, respectively. */
 extern s32 wl_cfg80211_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+	struct wireless_dev *wdev, char *name);
+extern s32 wl_cfg80211_del_if_locked(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *name);
 s32 _wl_cfg80211_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *ifname);
