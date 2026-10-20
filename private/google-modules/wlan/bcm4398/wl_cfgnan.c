@@ -7272,7 +7272,7 @@ wl_cfgnan_data_path_iface_create_delete_handler(struct net_device *ndev,
 				WL_ERR(("Couldn't get mac addr for NDI ret %d\n", ret));
 				goto fail;
 			}
-			wdev = wl_cfg80211_add_if(cfg, ndev, WL_IF_TYPE_NAN,
+			wdev = wl_cfg80211_add_if_locked(cfg, ndev, WL_IF_TYPE_NAN,
 				ifname, mac_addr);
 			if (!wdev) {
 				ret = -ENODEV;
