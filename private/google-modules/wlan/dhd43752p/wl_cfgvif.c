@@ -1126,10 +1126,10 @@ wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 	}
 #endif /* WL_NAN */
 
-	if ((ret = wl_cfg80211_del_if(cfg, primary_ndev,
-			wdev, NULL)) < 0) {
+	ret = wl_cfg80211_del_if_locked(cfg, primary_ndev, wdev, NULL);
+	if (ret < 0)
 		WL_ERR(("IF del failed\n"));
-	}
+
 
 	return ret;
 }
