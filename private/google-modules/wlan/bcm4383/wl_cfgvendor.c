@@ -15136,7 +15136,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = NAN_WIFI_SUBCMD_ENABLE
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_nan_start_handler,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = nan_attr_policy,
@@ -15621,7 +15622,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_BRCM,
 			.subcmd = BRCM_VENDOR_SCMD_SET_MAC
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_set_p2p_rand_mac,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = brcm_drv_attr_policy,
