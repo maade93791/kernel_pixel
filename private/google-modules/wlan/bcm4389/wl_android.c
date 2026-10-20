@@ -13956,11 +13956,8 @@ wl_cfg80211_static_if_close(struct net_device *net)
 	wl_clr_drv_status(cfg, AP_ROLE_UPGRADED, net);
 
 	if (cfg->static_ndev_state == NDEV_STATE_FW_IF_CREATED) {
-		if (mutex_is_locked(&cfg->if_sync) == TRUE) {
-			ret = _wl_cfg80211_del_if(cfg, primary_ndev, net->ieee80211_ptr, net->name);
-		} else {
-			ret = wl_cfg80211_del_if(cfg, primary_ndev, net->ieee80211_ptr, net->name);
-		}
+		/* Actual static ndo_stop owns RTNL without DHD/private locks. */
+		ret = wl_cfg80211_del_if(cfg, primary_ndev, net->ieee80211_ptr, net->name);
 
 		if (unlikely(ret)) {
 			WL_ERR(("Del iface failed for static_if %d\n", ret));
