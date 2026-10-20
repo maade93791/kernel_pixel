@@ -18,6 +18,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
 #include <linux/amba/bus.h>
+#include <linux/amba/pl330.h>
 #include <linux/scatterlist.h>
 #include <linux/of.h>
 #include <linux/of_dma.h>
@@ -26,7 +27,7 @@
 #include <linux/bug.h>
 #include <linux/cpumask.h>
 #include <linux/of_address.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "dmaengine.h"
 
@@ -3541,9 +3542,7 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 	 * This is the limit for transfers with a buswidth of 1, larger
 	 * buswidths will have larger limits.
 	 */
-	ret = dma_set_max_seg_size(&adev->dev, 1900800);
-	if (ret)
-		dev_err(&adev->dev, "unable to set the seg size\n");
+	dma_set_max_seg_size(&adev->dev, 1900800);
 
 
 	dev_info(&adev->dev,
