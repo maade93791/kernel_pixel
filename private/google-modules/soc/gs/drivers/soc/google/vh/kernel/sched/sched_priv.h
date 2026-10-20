@@ -1471,3 +1471,5 @@ unsigned int map_scaling_freq(int cpu, unsigned int freq);
 void reset_scaling_freq(int cpu);
 
 void update_thermal_freq_cap(unsigned int cpu);
+
+void rvh_wake_up_new_task_pixel_mod(void *data, struct task_struct *tsk);
