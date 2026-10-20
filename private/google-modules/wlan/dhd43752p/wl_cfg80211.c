@@ -2679,9 +2679,16 @@ _wl_cfg80211_add_if(struct bcm_cfg80211 *cfg,
 	 * in user supplicant initialization. The role conflict rules will be
 	 * applied from discovery context if userspace tries to use discovery.
 	 */
-	if ((wl_iftype != WL_IF_TYPE_P2P_DISC) &&
-		(err = wl_cfg80211_handle_if_role_conflict(cfg, wl_iftype)) < 0) {
-		return NULL;
+	if (wl_iftype != WL_IF_TYPE_P2P_DISC) {
+		/* Policy may close an UP interface before taking private teardown locks. */
+		mutex_unlock(&cfg->if_sync);
+		err = wl_cfg80211_handle_if_role_conflict(cfg, wl_iftype);
+		mutex_lock(&cfg->if_sync);
+		if (err < 0)
+			return NULL;
+		/* Closing a static AP can stop the chip when primary is down. */
+		if (!wl_get_drv_status(cfg, READY, primary_ndev))
+			return NULL;
 	}
 #endif /* WL_IFACE_MGMT */
 #ifdef DNGL_AXI_ERROR_LOGGING
@@ -4156,71 +4163,93 @@ s32
 wl_cfg80211_delete_iface(struct bcm_cfg80211 *cfg,
 	wl_iftype_t sec_data_if_type)
 {
+	struct net_device *targets[DHD_MAX_IFS];
+	struct net_device *primary_ndev = bcmcfg_to_prmry_ndev(cfg);
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
 	struct net_info *iter, *next;
-	struct net_device *primary_ndev;
+	unsigned int count = 0, i;
 	s32 ret = BCME_OK;
-	uint8 i = 0;
 
-	BCM_REFERENCE(i);
-	BCM_REFERENCE(ret);
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(wiphy);
+	lockdep_assert_not_held(&cfg->if_sync);
+	WL_DBG(("Enter, deleting iftype %s\n", wl_iftype_to_str(sec_data_if_type)));
 
-	/* Note: This function will clean up only the network interface and host
-	 * data structures. The firmware interface clean up will happen in the
-	 * during chip reset (ifconfig wlan0 down for built-in drivers/rmmod
-	 * context for the module case).
-	 */
-	primary_ndev = bcmcfg_to_prmry_ndev(cfg);
-	WL_DBG(("Enter, deleting iftype  %s\n",
-		wl_iftype_to_str(sec_data_if_type)));
+	/* Capture only policy-selected identities; no net_info survives dev_close. */
+	mutex_lock(&cfg->if_sync);
 	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	for_each_ndev(cfg, iter, next) {
 		GCC_DIAGNOSTIC_POP();
-		if (iter->ndev && (iter->ndev != primary_ndev)) {
-			if (iter->iftype != sec_data_if_type) {
+		if (!iter->ndev || iter->ndev == primary_ndev || iter->iftype != sec_data_if_type)
+			continue;
+		if (WARN_ON_ONCE(count == ARRAY_SIZE(targets))) {
+			ret = -E2BIG;
+			break;
+		}
+		targets[count++] = iter->ndev;
+		dev_hold(iter->ndev);
+	}
+	mutex_unlock(&cfg->if_sync);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < count; i++) {
+		struct net_device *target = targets[i];
+		bool static_ap = false;
+
+		switch (sec_data_if_type) {
+		case WL_IF_TYPE_P2P_GO:
+		case WL_IF_TYPE_P2P_GC:
+		case WL_IF_TYPE_AP:
+			break;
+#ifdef WL_NAN
+		case WL_IF_TYPE_NAN:
+			if (!wl_cfgnan_is_enabled(cfg)) {
+				WL_INFORM_MEM(("Nan is not active, ignore NDI delete\n"));
 				continue;
 			}
-			switch (sec_data_if_type) {
-				case WL_IF_TYPE_P2P_GO:
-				case WL_IF_TYPE_P2P_GC: {
-					ret = _wl_cfg80211_del_if(cfg,
-						iter->ndev, NULL, iter->ndev->name);
-					break;
-				}
-#ifdef WL_NAN
-				case WL_IF_TYPE_NAN: {
-					if (wl_cfgnan_is_enabled(cfg) == false) {
-						WL_INFORM_MEM(("Nan is not active,"
-							" ignore NDI delete\n"));
-					} else {
-						ret = wl_cfgnan_delete_ndp(cfg, iter->ndev);
-					}
-					break;
-				}
-#endif /* WL_NAN */
-				case WL_IF_TYPE_AP: {
-					/* Cleanup AP */
-#ifdef WL_STATIC_IF
-						/* handle static ap */
-					if (IS_CFG80211_STATIC_IF(cfg, iter->ndev)) {
-						dev_close(iter->ndev);
-					} else
-#endif /* WL_STATIC_IF */
-					{
-						/* handle virtual created AP */
-						ret = _wl_cfg80211_del_if(cfg, iter->ndev,
-							NULL, iter->ndev->name);
-					}
-					break;
-				}
-				default: {
-					WL_ERR(("Unsupported interface type\n"));
-					ret = -ENOTSUPP;
-					goto fail;
-				}
-			}
+			break;
+#endif
+		default:
+			WL_ERR(("Unsupported interface type\n"));
+			ret = -ENOTSUPP;
+			goto out;
 		}
+#ifdef WL_STATIC_IF
+		static_ap = sec_data_if_type == WL_IF_TYPE_AP &&
+			IS_CFG80211_STATIC_IF(cfg, target);
+#endif
+		if ((target->flags & IFF_UP) || static_ap) {
+			/* Native down notifiers and static ndo_stop may reenter us. */
+			wiphy_unlock(wiphy);
+			dev_close(target);
+			wiphy_lock(wiphy);
+		}
+		mutex_lock(&cfg->if_sync);
+		/* Static close can already have removed its firmware metadata. */
+		if (static_ap || !wl_get_netinfo_by_netdev(cfg, target)) {
+			mutex_unlock(&cfg->if_sync);
+			continue;
+		}
+		switch (sec_data_if_type) {
+		case WL_IF_TYPE_P2P_GO:
+		case WL_IF_TYPE_P2P_GC:
+		case WL_IF_TYPE_AP:
+			ret = _wl_cfg80211_del_if(cfg, target, NULL, target->name);
+			break;
+#ifdef WL_NAN
+		case WL_IF_TYPE_NAN:
+			ret = wl_cfgnan_delete_ndp(cfg, target);
+			break;
+#endif
+		default:
+			break;
+		}
+		mutex_unlock(&cfg->if_sync);
 	}
-fail:
+out:
+	for (i = 0; i < count; i++)
+		dev_put(targets[i]);
 	return ret;
 }
 
@@ -11331,9 +11360,7 @@ wl_cfg80211_cleanup_connection(struct net_device *net, bool user_enforced)
 	/* Clean up NAN connection */
 #ifdef WL_NAN
 	if (wl_cfgnan_is_enabled(cfg)) {
-		mutex_lock(&cfg->if_sync);
 		ret = wl_cfgnan_check_nan_disable_pending(cfg, true);
-		mutex_unlock(&cfg->if_sync);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to disable nan, error[%d]\n", ret));
 		}
@@ -19443,9 +19470,10 @@ s32 wl_cfg80211_down(struct net_device *dev)
 
 	if (cfg) {
 #ifdef WL_NAN
-		mutex_lock(&cfg->if_sync);
+		ASSERT_RTNL();
+		wiphy_lock(bcmcfg_to_wiphy(cfg));
 		wl_cfgnan_check_nan_disable_pending(cfg, true);
-		mutex_unlock(&cfg->if_sync);
+		wiphy_unlock(bcmcfg_to_wiphy(cfg));
 #endif /* WL_NAN */
 
 		mutex_lock(&cfg->usr_sync);

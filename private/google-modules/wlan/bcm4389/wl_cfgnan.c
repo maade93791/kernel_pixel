@@ -3173,13 +3173,24 @@ wl_cfgnan_start_handler(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 
 #ifdef WL_IFACE_MGMT
 	cfg->wiphy_lock_held = true;
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN_NMI)) != BCME_OK) {
+	NAN_MUTEX_UNLOCK();
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN_NMI);
+	mutex_lock(&cfg->if_sync);
+	NAN_MUTEX_LOCK();
+	if (ret != BCME_OK) {
 		WL_ERR(("Conflicting iface is present, cant support nan\n"));
 		NAN_MUTEX_UNLOCK();
 		mutex_unlock(&cfg->if_sync);
 		goto fail;
 	}
 	cfg->wiphy_lock_held = false;
+	if (!dhdp->up) {
+		WL_ERR(("bus stopped during interface policy\n"));
+		NAN_MUTEX_UNLOCK();
+		mutex_unlock(&cfg->if_sync);
+		return BCME_ERROR;
+	}
 #endif /* WL_IFACE_MGMT */
 
 	/* disable TDLS on NAN init  */
@@ -3556,12 +3567,10 @@ wl_cfgnan_start_handler(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 
 fail:
 	if (unlikely(ret) || unlikely(cmd_data->status)) {
-		mutex_lock(&cfg->if_sync);
 		ret = wl_cfg80211_delete_iface(cfg, WL_IF_TYPE_NAN);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to delete NDI[%d]\n", ret));
 		}
-		mutex_unlock(&cfg->if_sync);
 		if (delayed_work_pending(&cfg->nancfg->nan_nmi_rand)) {
 			cancel_delayed_work_sync(&cfg->nancfg->nan_nmi_rand);
 		}
@@ -3622,6 +3631,7 @@ wl_cfgnan_disable(struct bcm_cfg80211 *cfg)
 			WL_ERR(("failed to delete NDI[%d]\n", ret));
 		}
 
+		mutex_lock(&cfg->if_sync);
 		ret = wl_cfgnan_stop_handler(ndev, cfg);
 		if (ret == -ENODEV) {
 			WL_ERR(("Bus is down, proceed to cleanup\n"));
@@ -3635,6 +3645,7 @@ wl_cfgnan_disable(struct bcm_cfg80211 *cfg)
 			WL_ERR(("failed to de-initialize NAN[%d]\n", ret));
 		}
 		wl_cfgnan_disable_cleanup(cfg);
+		mutex_unlock(&cfg->if_sync);
 	}
 	NAN_DBG_EXIT();
 	return ret;
@@ -3748,7 +3759,6 @@ wl_cfgnan_delayed_disable(struct work_struct *work)
 
 	rtnl_lock();
 	wiphy_lock(bcmcfg_to_wiphy(cfg));
-	mutex_lock(&cfg->if_sync);
 	spin_lock_irqsave(&nancfg->nan_disable_lock, flags);
 	if (!nancfg->nan_disable_pending || nancfg->nan_disable_stopping) {
 		spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
@@ -3775,7 +3785,6 @@ wl_cfgnan_delayed_disable(struct work_struct *work)
 	wl_cfgnan_disable_wake_unlock(nancfg);
 	spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
 out:
-	mutex_unlock(&cfg->if_sync);
 	wiphy_unlock(bcmcfg_to_wiphy(cfg));
 	rtnl_unlock();
 }
@@ -7202,9 +7211,20 @@ wl_cfgnan_data_path_request_handler(struct net_device *ndev,
 	mutex_lock(&cfg->if_sync);
 	NAN_MUTEX_LOCK();
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN)) < 0) {
+	NAN_MUTEX_UNLOCK();
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN);
+	mutex_lock(&cfg->if_sync);
+	NAN_MUTEX_LOCK();
+	if (ret < 0) {
 		WL_ERR(("Conflicting iface found to be active\n"));
 		ret = BCME_UNSUPPORTED;
+		goto fail;
+	}
+	if (!wl_get_drv_status(cfg, READY, bcmcfg_to_prmry_ndev(cfg)) ||
+	    !cfg->nancfg->nan_init_state || !cfg->nancfg->nan_enable) {
+		WL_ERR(("NAN stopped during interface policy\n"));
+		ret = BCME_NOTREADY;
 		goto fail;
 	}
 #endif /* WL_IFACE_MGMT */
@@ -7504,9 +7524,20 @@ wl_cfgnan_data_path_response_handler(struct net_device *ndev,
 	mutex_lock(&cfg->if_sync);
 	NAN_MUTEX_LOCK();
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN)) < 0) {
+	NAN_MUTEX_UNLOCK();
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN);
+	mutex_lock(&cfg->if_sync);
+	NAN_MUTEX_LOCK();
+	if (ret < 0) {
 		WL_ERR(("Conflicting iface found to be active\n"));
 		ret = BCME_UNSUPPORTED;
+		goto fail;
+	}
+	if (!wl_get_drv_status(cfg, READY, bcmcfg_to_prmry_ndev(cfg)) ||
+	    !cfg->nancfg->nan_init_state || !cfg->nancfg->nan_enable) {
+		WL_ERR(("NAN stopped during interface policy\n"));
+		ret = BCME_NOTREADY;
 		goto fail;
 	}
 #endif /* WL_IFACE_MGMT */
