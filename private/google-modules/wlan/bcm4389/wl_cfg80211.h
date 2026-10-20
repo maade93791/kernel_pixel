@@ -3377,8 +3377,11 @@ extern void wl_cfg80211_update_power_mode(struct net_device *dev);
 extern void wl_terminate_event_handler(struct net_device *dev);
 extern struct bcm_cfg80211 *wl_get_cfg(struct net_device *ndev);
 extern s32 wl_cfg80211_set_if_band(struct net_device *ndev, int band);
+/* RTNL-only entry and RTNL+wiphy entry, respectively. */
 extern s32 wl_cfg80211_set_country_code(struct net_device *dev, char *country_code,
         bool notify, bool user_enforced, int revinfo);
+s32 wl_cfg80211_set_country_code_locked(struct net_device *dev, char *country_code,
+	bool notify, bool user_enforced, int revinfo);
 extern uint8 wl_cfg80211_is_hal_started(struct bcm_cfg80211 *cfg);
 #ifdef WL_WIPSEVT
 extern int wl_cfg80211_wips_event(uint16 misdeauth, char* bssid);

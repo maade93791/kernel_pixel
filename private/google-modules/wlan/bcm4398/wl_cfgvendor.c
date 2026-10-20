@@ -594,7 +594,7 @@ wl_cfgvendor_set_country(struct wiphy *wiphy,
 #endif /* WL_AUTO_COUNTRY */
 
 	/* country code is unique for dongle..hence using primary interface. */
-	err = wl_cfg80211_set_country_code(primary_ndev, country_code, true, true, 0);
+	err = wl_cfg80211_set_country_code_locked(primary_ndev, country_code, true, true, 0);
 	if (err < 0) {
 		WL_ERR(("Set country failed ret:%d\n", err));
 		goto exit;
@@ -14230,7 +14230,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = ANDR_WIFI_SET_COUNTRY
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_set_country,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = andr_wifi_attr_policy,

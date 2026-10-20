@@ -11472,7 +11472,7 @@ wl_cfg80211_update_self_regd(struct bcm_cfg80211 *cfg, char *ccode)
 #endif /* defined(CUSTOMER_HW6) || defined(WIPHY_DYNAMIC_UPDATE) */
 
 s32
-wl_cfg80211_set_country_code(struct net_device *net, char *country_code,
+wl_cfg80211_set_country_code_locked(struct net_device *net, char *country_code,
 	bool notify, bool user_enforced, int revinfo)
 {
 	s32 ret = BCME_OK;
@@ -11482,6 +11482,9 @@ wl_cfg80211_set_country_code(struct net_device *net, char *country_code,
 #ifdef READ_CONFIG_FROM_FILE
 	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
 #endif /* READ_CONFIG_FROM_FILE */
+
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(wiphy);
 
 	if (revinfo < 0) {
 		WL_ERR(("country revinfo wrong : %d\n", revinfo));
@@ -11538,6 +11541,22 @@ wl_cfg80211_set_country_code(struct net_device *net, char *country_code,
 	ret = wl_cfg80211_update_self_regd(cfg, country_code);
 
 exit:
+	return ret;
+}
+
+/* Android IOCTL and Wondertap own RTNL, without this DHD wiphy. */
+s32
+wl_cfg80211_set_country_code(struct net_device *net, char *country_code,
+	bool notify, bool user_enforced, int revinfo)
+{
+	struct wiphy *wiphy = ndev_to_wdev(net)->wiphy;
+	s32 ret;
+
+	ASSERT_RTNL();
+	wiphy_lock(wiphy);
+	ret = wl_cfg80211_set_country_code_locked(net, country_code,
+		notify, user_enforced, revinfo);
+	wiphy_unlock(wiphy);
 	return ret;
 }
 
