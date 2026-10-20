@@ -3910,11 +3910,9 @@ wl_cfg80211_post_ifcreate(struct net_device *ndev,
 		if (wl_cfg80211_register_if(cfg, event->ifidx, new_ndev, rtnl_lock_reqd)
 			!= BCME_OK) {
 			WL_ERR(("IFACE register failed \n"));
-			/* Post interface registration, wdev would be freed from the netdev
-			 * destructor path. For other cases, handle it here.
-			 */
-			MFREE(cfg->osh, wdev, sizeof(*wdev));
+			/* Interface removal uses wdev to quiesce pending notifications. */
 			wl_cfg80211_remove_if(cfg, event->ifidx, new_ndev, rtnl_lock_reqd);
+			MFREE(cfg->osh, wdev, sizeof(*wdev));
 			return NULL;
 		}
 	}
@@ -18282,6 +18280,97 @@ void wl_cfg80211_invalidate_wiphy_events(struct wireless_dev *wdev)
 	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
 }
 
+/*
+ * Wait out borrowed-device users before unregister or DHD-private cleanup.
+ * Release event_sync before any native operation can acquire RTNL or wiphy.
+ */
+void wl_cfg80211_quiesce_wiphy_events(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_info *info;
+	struct wl_wiphy_event *event, *next;
+	unsigned long flags;
+
+	if (!wdev || !wdev->wiphy)
+		return;
+	cfg = wiphy_priv(wdev->wiphy);
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (wdev->identifier)
+		cfg80211_ch_switch_notify_cancel(wdev, -1);
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			if (!info->wiphy_events_quiescing) {
+				info->wiphy_events_quiescing = true;
+				info->association_generation++;
+			}
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	/* A static interface may retain its wdev while netinfo is replaced. */
+	list_for_each_entry_safe(event, next, &cfg->wiphy_events, list) {
+		if (event->wdev_id == wdev->identifier) {
+			list_del(&event->list);
+			wl_free_wiphy_event(cfg, event);
+		}
+	}
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+
+/* Re-enable only an interface which completed native registration. */
+void wl_cfg80211_resume_wiphy_events(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_info *info;
+	unsigned long flags;
+
+	if (!wdev || !wdev->wiphy)
+		return;
+	cfg = wiphy_priv(wdev->wiphy);
+	mutex_lock(&cfg->wiphy_event_sync);
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev) {
+			if (info->wiphy_events_quiescing) {
+				info->association_generation++;
+				info->wiphy_events_quiescing = false;
+			}
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	mutex_unlock(&cfg->wiphy_event_sync);
+}
+
+/* Serialize native event publication with the per-interface cancel barrier. */
+int wl_cfg80211_queue_ch_switch_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	const struct cfg80211_chan_def *chandef, unsigned int link_id)
+{
+	struct net_info *info;
+	unsigned long flags;
+	bool live = false;
+	int err = -ENODEV;
+
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped)
+		goto out;
+
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		if (info->wdev == wdev && !info->wiphy_events_quiescing) {
+			live = true;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	if (live && wdev->identifier)
+		err = cfg80211_ch_switch_notify_queued(wdev->netdev, chandef, link_id, GFP_KERNEL);
+out:
+	mutex_unlock(&cfg->wiphy_event_sync);
+	return err;
+}
+
 s32
 wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
 	struct wl_wiphy_event *event, wl_wiphy_event_func_t func)
@@ -18290,18 +18379,21 @@ wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wde
 	unsigned long flags;
 	int err = -ENODEV;
 
-	/* Callers hold if_sync while consuming the firmware event. */
-	if (!wdev->identifier)
-		return -ENODEV;
 	if (event->link_id >= IEEE80211_MLD_MAX_NUM_LINKS)
 		return -EINVAL;
 
-	event->wdev_id = wdev->identifier;
-	event->iftype = wdev->iftype;
-	event->deliver = func;
+	/* Snapshot and publication share the barrier with interface quiesce. */
+	mutex_lock(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped)
+		goto out;
+
 	spin_lock_irqsave(&cfg->net_list_sync, flags);
 	list_for_each_entry(info, &cfg->net_list, list) {
-		if (info->wdev == wdev) {
+		if (info->wdev == wdev && !info->wiphy_events_quiescing &&
+			wdev->identifier) {
+			event->wdev_id = wdev->identifier;
+			info->wiphy_event_id = event->wdev_id;
+			event->iftype = wdev->iftype;
 			event->association_generation = info->association_generation;
 			if (event->link_id >= 0)
 				event->link_generation = info->link_generation[event->link_id];
@@ -18311,20 +18403,17 @@ wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wde
 	}
 	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
 	if (err)
-		return err;
+		goto out;
 
-	mutex_lock(&cfg->wiphy_event_sync);
-	if (cfg->wiphy_events_stopped) {
-		err = -ENODEV;
-	} else {
-		event->generation = cfg->wiphy_event_generation;
+	event->deliver = func;
+	event->generation = cfg->wiphy_event_generation;
 #ifdef BCMDONGLEHOST
-		/* The event wake source itself does not support nested references. */
-		event->wake_held = dhd_os_wake_lock(cfg->pub) > 0;
+	/* The event wake source itself does not support nested references. */
+	event->wake_held = dhd_os_wake_lock(cfg->pub) > 0;
 #endif
-		list_add_tail(&event->list, &cfg->wiphy_events);
-		wiphy_work_queue(wdev->wiphy, &cfg->wiphy_event_work);
-	}
+	list_add_tail(&event->list, &cfg->wiphy_events);
+	wiphy_work_queue(bcmcfg_to_wiphy(cfg), &cfg->wiphy_event_work);
+out:
 	mutex_unlock(&cfg->wiphy_event_sync);
 	return err;
 }
@@ -18653,6 +18742,9 @@ wl_cfg80211_netdev_notifier_call(struct notifier_block * nb,
 			break;
 		}
 		case NETDEV_UNREGISTER:
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			wl_cfg80211_quiesce_wiphy_events(wdev);
+#endif
 			wl_cfg80211_clear_per_bss_ies(cfg, wdev);
 			/* after calling list_del_rcu(&wdev->list) */
 			wl_dealloc_netinfo_by_wdev(cfg, wdev);

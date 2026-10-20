@@ -1482,6 +1482,8 @@ typedef struct wl_chan_info {
 struct net_info {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 	u64 association_generation; /* protected by net_list_sync */
+	u32 wiphy_event_id; /* core identifier cached under net_list_sync */
+	bool wiphy_events_quiescing; /* protected by net_list_sync and wiphy_event_sync */
 	u64 link_generation[IEEE80211_MLD_MAX_NUM_LINKS];
 #endif
 	struct net_device *ndev;
@@ -2552,45 +2554,49 @@ struct bcm_cfg80211 {
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/* May sleep; no RTNL/wiphy acquisition occurs while holding event_sync. */
+void wl_cfg80211_quiesce_wiphy_events(struct wireless_dev *wdev);
+void wl_cfg80211_resume_wiphy_events(struct wireless_dev *wdev);
+int wl_cfg80211_queue_ch_switch_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	const struct cfg80211_chan_def *chandef, unsigned int link_id);
 s32 wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
 	struct wl_wiphy_event *event, wl_wiphy_event_func_t func);
 
-/* The native wiphy mutex protects registration and the returned device. */
+/* Caller holds wiphy and event_sync; unregister barriers protect borrowed wdevs. */
 static inline struct wireless_dev *
 wl_cfg80211_event_wdev(struct wiphy *wiphy, const struct wl_wiphy_event *event)
 {
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-	struct wireless_dev *wdev;
+	struct wireless_dev *wdev = NULL;
 	struct net_info *info;
 	unsigned long flags;
-	bool matches;
 
 	lockdep_assert_held(&wiphy->mtx);
 	lockdep_assert_held(&cfg->wiphy_event_sync);
 	if (cfg->wiphy_events_stopped || event->generation != cfg->wiphy_event_generation)
 		return NULL;
 
-	list_for_each_entry(wdev, &wiphy->wdev_list, list) {
-		if (wdev->identifier != event->wdev_id || !wdev->registered ||
-			!wdev->netdev || wdev->iftype != event->iftype)
-			continue;
+	/* Legacy DHD unregister does not serialize the native wdev_list with wiphy. */
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		struct wireless_dev *candidate;
 
-		matches = false;
-		spin_lock_irqsave(&cfg->net_list_sync, flags);
-		list_for_each_entry(info, &cfg->net_list, list) {
-			if (info->wdev == wdev) {
-				matches = info->association_generation ==
-					event->association_generation;
-				if (matches && event->link_id >= 0)
-					matches = info->link_generation[event->link_id] ==
-						event->link_generation;
-				break;
-			}
+		/* Test before touching wdev: the entry may outlive its unregister. */
+		if (info->wiphy_events_quiescing || info->wiphy_event_id != event->wdev_id ||
+			info->association_generation != event->association_generation ||
+			(event->link_id >= 0 && info->link_generation[event->link_id] !=
+			 event->link_generation))
+			continue;
+		candidate = info->wdev;
+		if (candidate && candidate->identifier == event->wdev_id &&
+			candidate->registered && candidate->netdev &&
+			candidate->iftype == event->iftype) {
+			wdev = candidate;
+			break;
 		}
-		spin_unlock_irqrestore(&cfg->net_list_sync, flags);
-		return matches ? wdev : NULL;
 	}
-	return NULL;
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	return wdev;
 }
 #endif
 
