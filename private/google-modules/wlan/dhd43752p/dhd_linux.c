@@ -3429,11 +3429,68 @@ int32 dhd_role_to_nl80211_iftype(int32 role)
 }
 #endif /* WL_CFG80211 && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/*
+ * Process-owned native interface transition. No private lock is held while
+ * acquiring RTNL or closing an UP netdev. Success owns RTNL -> wiphy -> net-if.
+ */
+struct wiphy *dhd_netdev_lifecycle_lock(dhd_pub_t *dhdp, int ifidx)
+{
+	dhd_info_t *dhd = dhdp->info;
+	struct net_device *primary, *target = NULL;
+	struct wiphy *wiphy;
+
+	if (ifidx <= 0 || ifidx >= DHD_MAX_IFS)
+		return ERR_PTR(-EINVAL);
+	while (!rtnl_trylock()) {
+		/* Primary stop joins deferred work while it owns RTNL. */
+		if (READ_ONCE(dhd->if_lifecycle_stopping) ||
+		    READ_ONCE(dhd->if_lifecycle_draining))
+			return ERR_PTR(-ESHUTDOWN);
+		OSL_SLEEP(20);
+	}
+	dhd_net_if_lock_local(dhd);
+	primary = dhd->iflist[0] ? dhd->iflist[0]->net : NULL;
+	if (READ_ONCE(dhd->if_lifecycle_stopping) || !primary || !primary->ieee80211_ptr) {
+		dhd_net_if_unlock_local(dhd);
+		rtnl_unlock();
+		return ERR_PTR(-ESHUTDOWN);
+	}
+	wiphy = primary->ieee80211_ptr->wiphy;
+	if (dhd->iflist[ifidx])
+		target = dhd->iflist[ifidx]->net;
+#ifdef WL_STATIC_IF
+	/* Firmware deletion leaves persistent static host netdevs registered. */
+	if (target && IS_CFG80211_STATIC_IF(wl_get_cfg(primary), target))
+		target = NULL;
+#endif
+	dhd_net_if_unlock_local(dhd);
+
+	/* RTNL pins registration/slots against every native lifecycle mutator. */
+	if (target && target->reg_state == NETREG_REGISTERED && (target->flags & IFF_UP))
+		dev_close(target);
+	wiphy_lock(wiphy);
+	dhd_net_if_lock_local(dhd);
+	return wiphy;
+}
+
+void dhd_netdev_lifecycle_unlock(dhd_pub_t *dhdp, struct wiphy *wiphy)
+{
+	dhd_net_if_unlock_local(dhdp->info);
+	wiphy_unlock(wiphy);
+	rtnl_unlock();
+}
+#endif
+
 static void
 dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 {
 	dhd_info_t *dhd = handle;
 	dhd_if_event_t *if_event = event_info;
+	bool need_rtnl_lock = true;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy;
+#endif
 	int ifidx, bssidx;
 	int ret = 0;
 #if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
@@ -3460,7 +3517,18 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 		return;
 	}
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wiphy = dhd_netdev_lifecycle_lock(&dhd->pub, if_event->event.ifidx);
+	if (IS_ERR(wiphy)) {
+		DHD_TRACE(("%s: interface work rejected (%ld)\n",
+			__FUNCTION__, PTR_ERR(wiphy)));
+		MFREE(dhd->pub.osh, if_event, sizeof(*if_event));
+		return;
+	}
+	need_rtnl_lock = false;
+#else
 	dhd_net_if_lock_local(dhd);
+#endif
 	DHD_OS_WAKE_LOCK(&dhd->pub);
 
 	ifidx = if_event->event.ifidx;
@@ -3490,7 +3558,7 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 		}
 
 		if ((ndev = wl_cfg80211_post_ifcreate(dhd->pub.info->iflist[0]->net,
-			&info, mac_addr, NULL, true)) == NULL) {
+			&info, mac_addr, NULL, need_rtnl_lock)) == NULL) {
 			/* Do the post interface create ops */
 			DHD_ERROR(("Post ifcreate ops failed. Returning \n"));
 			ret = BCME_ERROR;
@@ -3502,17 +3570,17 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 	/* The interface name in host and in event msg are same */
 	/* if name in event msg is used to create dongle if list on host */
 	ndev = dhd_allocate_if(&dhd->pub, ifidx, if_event->name,
-		if_event->mac, bssidx, TRUE, if_event->name);
+		if_event->mac, bssidx, need_rtnl_lock, if_event->name);
 	if (!ndev) {
 		DHD_ERROR(("%s: net device alloc failed  \n", __FUNCTION__));
 		ret = BCME_NOMEM;
 		goto done;
 	}
 
-	ret = dhd_register_if(&dhd->pub, ifidx, TRUE);
+	ret = dhd_register_if(&dhd->pub, ifidx, need_rtnl_lock);
 	if (ret != BCME_OK) {
 		DHD_ERROR(("%s: dhd_register_if failed\n", __FUNCTION__));
-		dhd_remove_if(&dhd->pub, ifidx, TRUE);
+		dhd_remove_if(&dhd->pub, ifidx, need_rtnl_lock);
 		goto done;
 	}
 
@@ -3526,7 +3594,7 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 				NULL, 0, TRUE);
 		if (ret != BCME_OK) {
 			DHD_ERROR(("%s: Failed to set ap_isolate to dongle\n", __FUNCTION__));
-			dhd_remove_if(&dhd->pub, ifidx, TRUE);
+			dhd_remove_if(&dhd->pub, ifidx, need_rtnl_lock);
 		}
 	}
 #endif /* PCIE_FULL_DONGLE */
@@ -3548,7 +3616,11 @@ done:
 #endif /* defiend(WLDWDS) && defined(FOURADDR_AUTO_BRG) */
 
 	DHD_OS_WAKE_UNLOCK(&dhd->pub);
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	dhd_netdev_lifecycle_unlock(&dhd->pub, wiphy);
+#else
 	dhd_net_if_unlock_local(dhd);
+#endif
 }
 
 static void
@@ -3557,6 +3629,10 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	dhd_info_t *dhd = handle;
 	int ifidx;
 	dhd_if_event_t *if_event = event_info;
+	bool need_rtnl_lock = true;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy;
+#endif
 
 	if (event != DHD_WQ_WORK_IF_DEL) {
 		DHD_ERROR(("%s: unexpected event \n", __FUNCTION__));
@@ -3573,7 +3649,18 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 		return;
 	}
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wiphy = dhd_netdev_lifecycle_lock(&dhd->pub, if_event->event.ifidx);
+	if (IS_ERR(wiphy)) {
+		DHD_TRACE(("%s: interface work rejected (%ld)\n",
+			__FUNCTION__, PTR_ERR(wiphy)));
+		MFREE(dhd->pub.osh, if_event, sizeof(*if_event));
+		return;
+	}
+	need_rtnl_lock = false;
+#else
 	dhd_net_if_lock_local(dhd);
+#endif
 	DHD_OS_WAKE_LOCK(&dhd->pub);
 
 	ifidx = if_event->event.ifidx;
@@ -3591,14 +3678,14 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	if (if_event->event.ifidx > 0) {
 		/* Do the post interface del ops */
 		if (wl_cfg80211_post_ifdel(dhd->pub.info->iflist[ifidx]->net,
-				true, if_event->event.ifidx) != 0) {
+				need_rtnl_lock, if_event->event.ifidx) != 0) {
 			DHD_TRACE(("Post ifdel ops failed. Returning \n"));
 			goto done;
 		}
 	}
 #else
 	/* For non-cfg80211 drivers */
-	dhd_remove_if(&dhd->pub, ifidx, TRUE);
+	dhd_remove_if(&dhd->pub, ifidx, need_rtnl_lock);
 #ifdef DHD_AWDL
 	if (if_event->event.opcode == WLC_E_IF_DEL &&
 		if_event->event.role == WLC_E_IF_ROLE_AWDL) {
@@ -3611,7 +3698,11 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 done:
 	MFREE(dhd->pub.osh, if_event, sizeof(dhd_if_event_t));
 	DHD_OS_WAKE_UNLOCK(&dhd->pub);
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	dhd_netdev_lifecycle_unlock(&dhd->pub, wiphy);
+#else
 	dhd_net_if_unlock_local(dhd);
+#endif
 }
 
 static void
