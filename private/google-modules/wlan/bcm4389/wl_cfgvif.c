@@ -1312,6 +1312,10 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 	}
 
 	mutex_lock(&cfg->if_sync);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
+
 
 	netinfo = wl_get_netinfo_by_wdev(cfg, ndev->ieee80211_ptr);
 	if (!netinfo) {
@@ -4101,9 +4105,17 @@ wl_cfg80211_stop_ap(
 		return (-ENODEV);
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	mutex_lock(&cfg->if_sync);
+#endif
 	wl_clr_drv_status(cfg, AP_CREATING, dev);
 	wl_clr_drv_status(cfg, AP_CREATED, dev);
 	cfg->ap_oper_channel = INVCHANSPEC;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+	mutex_unlock(&cfg->if_sync);
+#endif
+
 
 	if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
 		dev_role = NL80211_IFTYPE_AP;
@@ -5570,7 +5582,20 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec, struct wip
 	freq = chandef.chan ? chandef.chan->center_freq : chandef.center_freq1;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) || defined(WL_CH_SWITCH_BKPORT)
 	/* force set link_id and pucturing bitmap as 0  */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	{
+		int err;
+
+		err = wl_cfg80211_queue_ch_switch_event(wiphy_priv(wiphy),
+			dev->ieee80211_ptr, &chandef, 0);
+		if (err) {
+			WL_ERR(("Channel switch notification queue failed: %d\n", err));
+			return;
+		}
+	}
+#else
 	cfg80211_ch_switch_notify(dev, &chandef, 0);
+#endif
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2)) || defined(WL_MLO_BKPORT)
 	cfg80211_ch_switch_notify(dev, &chandef, 0);
 #else
