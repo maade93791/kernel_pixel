@@ -22043,9 +22043,12 @@ s32 wl_cfg80211_down(struct net_device *dev)
 
 	if (cfg) {
 #ifdef WL_NAN
+		ASSERT_RTNL();
+		wiphy_lock(bcmcfg_to_wiphy(cfg));
 		mutex_lock(&cfg->if_sync);
 		wl_cfgnan_check_nan_disable_pending(cfg, true);
 		mutex_unlock(&cfg->if_sync);
+		wiphy_unlock(bcmcfg_to_wiphy(cfg));
 #endif /* WL_NAN */
 
 #ifdef RTT_SUPPORT
