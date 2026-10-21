@@ -1,5 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef __FVMAP_H__
 #define __FVMAP_H__
+
+#include <linux/stddef.h>
 
 int fvmap_set_raw_voltage_table(unsigned int id, int uV);
 int fvmap_get_raw_voltage_table(unsigned int id);
@@ -23,14 +26,14 @@ struct fvmap_header {
 };
 
 struct clocks {
-	u16 addr[0];
+	DECLARE_FLEX_ARRAY(u16, addr);
 };
 
 struct pll_header {
 	u32 addr;
 	u16 o_lock;
 	u16 level;
-	u32 pms[0];
+	u32 pms[];
 };
 
 struct rate_volt {
@@ -39,11 +42,11 @@ struct rate_volt {
 };
 
 struct rate_volt_header {
-	struct rate_volt table[0];
+	DECLARE_FLEX_ARRAY(struct rate_volt, table);
 };
 
 struct dvfs_table {
-	u8 val[0];
+	DECLARE_FLEX_ARRAY(u8, val);
 };
 
 #if IS_ENABLED(CONFIG_ACPM_DVFS)
