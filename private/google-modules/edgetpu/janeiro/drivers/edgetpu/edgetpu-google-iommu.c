@@ -153,19 +153,6 @@ static int edgetpu_idr_free_domain_callback(int id, void *p, void *data)
 	return 0;
 }
 
-static int edgetpu_iommu_fault_handler(struct iommu_domain *domain,
-				       struct device *dev, unsigned long iova,
-				       int flags, void *token)
-{
-	struct edgetpu_iommu_domain *etdomain =
-		(struct edgetpu_iommu_domain *)token;
-
-	dev_dbg(dev, "IOMMU fault on address %08lX. PASID = %u flags = %08X",
-		iova, etdomain->pasid, flags);
-	// Tell the IOMMU driver we are OK with this fault
-	return 0;
-}
-
 static void edgetpu_init_etdomain(struct edgetpu_iommu_domain *etdomain,
 				  struct iommu_domain *domain,
 				  int token)
@@ -173,7 +160,6 @@ static void edgetpu_init_etdomain(struct edgetpu_iommu_domain *etdomain,
 	etdomain->iommu_domain = domain;
 	etdomain->pasid = IOMMU_PASID_INVALID;
 	etdomain->token = token;
-	iommu_set_fault_handler(domain, edgetpu_iommu_fault_handler, etdomain);
 }
 
 /*
