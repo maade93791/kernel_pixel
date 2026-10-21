@@ -1301,6 +1301,22 @@ static inline void exynos_panel_send_cmd_set(struct exynos_panel *ctx,
 }
 void exynos_panel_set_lp_mode(struct exynos_panel *ctx, const struct exynos_panel_mode *pmode);
 void exynos_panel_set_binned_lp(struct exynos_panel *ctx, const u16 brightness);
+void *__devm_exynos_panel_alloc(struct device *dev, size_t size, size_t bridge_offset);
+
+/**
+ * devm_exynos_panel_alloc - Allocate a panel with a reference counted DRM bridge
+ * @dev: panel device
+ * @type: type containing the panel and its bridge
+ * @member: name of the struct drm_bridge within @type
+ *
+ * The entire panel allocation is owned by the bridge. The initial reference is
+ * released by devm; other bridge references keep the panel allocation alive.
+ *
+ * Return: Pointer to the panel allocation, or ERR_PTR on failure.
+ */
+#define devm_exynos_panel_alloc(dev, type, member) \
+	((type *)__devm_exynos_panel_alloc(dev, sizeof(type), offsetof(type, member)))
+
 int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 				struct exynos_panel *ctx);
 int exynos_dcs_write_delay(struct exynos_panel *ctx, const void *data, size_t len,
