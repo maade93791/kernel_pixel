@@ -13,6 +13,29 @@
 #include "edgetpu-domain-pool.h"
 #include "edgetpu-internal.h"
 
+static int edgetpu_iommu_fault_handler(struct iommu_domain *domain,
+				       struct device *dev, unsigned long iova,
+				       int flags, void *token)
+{
+	struct edgetpu_dev *etdev = token;
+
+	etdev_dbg(etdev, "IOMMU fault on address %08lX flags = %08X\n", iova, flags);
+	/* Tell the IOMMU driver we are OK with this fault. */
+	return 0;
+}
+
+static struct iommu_domain *edgetpu_domain_alloc(struct edgetpu_domain_pool *pool)
+{
+	struct iommu_domain *domain;
+
+	domain = iommu_paging_domain_alloc_flags(pool->etdev->dev,
+						 HAS_IOMMU_PASID ? IOMMU_HWPT_ALLOC_PASID : 0);
+	/* The device outlives every pooled domain and its borrower. */
+	if (!IS_ERR(domain))
+		iommu_set_fault_handler(domain, edgetpu_iommu_fault_handler, pool->etdev);
+	return domain;
+}
+
 int edgetpu_domain_pool_init(struct edgetpu_dev *etdev, struct edgetpu_domain_pool *pool,
 			     unsigned int size)
 {
@@ -42,8 +65,7 @@ int edgetpu_domain_pool_init(struct edgetpu_dev *etdev, struct edgetpu_domain_po
 		return -ENOMEM;
 	}
 	for (i = 0; i < size; i++) {
-		domain = iommu_paging_domain_alloc_flags(pool->etdev->dev,
-						 HAS_IOMMU_PASID ? IOMMU_HWPT_ALLOC_PASID : 0);
+		domain = edgetpu_domain_alloc(pool);
 		if (IS_ERR(domain)) {
 			etdev_err(pool->etdev, "Failed to allocate iommu domain %d of %u\n", i + 1,
 				  size);
@@ -72,8 +94,7 @@ struct iommu_domain *edgetpu_domain_pool_alloc(struct edgetpu_domain_pool *pool)
 	struct iommu_domain *domain;
 
 	if (!pool->size) {
-		domain = iommu_paging_domain_alloc_flags(pool->etdev->dev,
-						 HAS_IOMMU_PASID ? IOMMU_HWPT_ALLOC_PASID : 0);
+		domain = edgetpu_domain_alloc(pool);
 		return IS_ERR(domain) ? NULL : domain;
 	}
 
