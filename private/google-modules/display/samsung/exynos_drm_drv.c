@@ -1011,6 +1011,7 @@ static const struct file_operations exynos_drm_driver_fops = {
 	.unlocked_ioctl	= drm_ioctl,
 	.compat_ioctl	= drm_compat_ioctl,
 	.release	= drm_release,
+	.fop_flags	= FOP_UNSIGNED_OFFSET,
 };
 
 static struct drm_driver exynos_drm_driver = {
