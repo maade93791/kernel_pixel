@@ -847,28 +847,75 @@ static phys_addr_t samsung_sysmmu_iova_to_phys(struct iommu_domain *dom,
 	return phys;
 }
 
+static void samsung_sysmmu_clientdata_free(struct sysmmu_clientdata *client)
+{
+	unsigned int i;
+
+	for (i = 0; i < client->sysmmu_count; i++) {
+		if (client->dev_link && client->dev_link[i])
+			device_link_del(client->dev_link[i]);
+		put_device(client->sysmmus[i]->dev);
+	}
+	kfree(client->dev_link);
+	kfree(client->sysmmus);
+	kfree(client);
+}
+
 static struct iommu_device *samsung_sysmmu_probe_device(struct device *dev)
 {
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
 	struct sysmmu_clientdata *client;
-	int i;
+	unsigned int i, j;
+	int ret;
 
-	if (!fwspec) {
-		dev_dbg(dev, "IOMMU instance data is not initialized\n");
+	if (!fwspec || !fwspec->num_ids)
 		return ERR_PTR(-ENODEV);
+
+	client = kzalloc(sizeof(*client), GFP_KERNEL);
+	if (!client)
+		return ERR_PTR(-ENOMEM);
+	client->sysmmus = kcalloc(fwspec->num_ids, sizeof(*client->sysmmus), GFP_KERNEL);
+	client->dev_link = kcalloc(fwspec->num_ids, sizeof(*client->dev_link), GFP_KERNEL);
+	if (!client->sysmmus || !client->dev_link) {
+		ret = -ENOMEM;
+		goto free_client;
 	}
 
-	client = dev_iommu_priv_get(dev);
-	if (!client || !client->sysmmu_count)
-		return ERR_PTR(-ENODEV);
-	if (client->dev_link)
-		return &client->sysmmus[0]->iommu;
-	client->dev_link = kcalloc(client->sysmmu_count,
-				   sizeof(*client->dev_link), GFP_KERNEL);
-	if (!client->dev_link)
-		return ERR_PTR(-ENOMEM);
+	for (i = 0; i < fwspec->num_ids; i++) {
+		struct device_node *np = of_find_node_by_phandle(fwspec->ids[i]);
+		struct platform_device *sysmmu;
+		struct sysmmu_drvdata *data;
 
-	for (i = 0; i < (int)client->sysmmu_count; i++) {
+		if (!np) {
+			ret = -ENODEV;
+			goto free_client;
+		}
+		sysmmu = of_find_device_by_node(np);
+		of_node_put(np);
+		if (!sysmmu) {
+			ret = -EPROBE_DEFER;
+			goto free_client;
+		}
+		data = platform_get_drvdata(sysmmu);
+		if (!data) {
+			put_device(&sysmmu->dev);
+			ret = -EPROBE_DEFER;
+			goto free_client;
+		}
+		for (j = 0; j < client->sysmmu_count; j++)
+			if (client->sysmmus[j] == data)
+				break;
+		if (j < client->sysmmu_count) {
+			put_device(&sysmmu->dev);
+			continue;
+		}
+		/* Retain the provider reference until IOMMU release, not driver unbind. */
+		client->sysmmus[client->sysmmu_count++] = data;
+		dev_info(dev, "has sysmmu %s (total count:%u)\n",
+			 dev_name(data->dev), client->sysmmu_count);
+	}
+
+	for (i = 0; i < client->sysmmu_count; i++) {
 		client->dev_link[i] =
 			device_link_add(dev,
 					client->sysmmus[i]->dev,
@@ -876,17 +923,19 @@ static struct iommu_device *samsung_sysmmu_probe_device(struct device *dev)
 		if (!client->dev_link[i]) {
 			dev_err(dev, "failed to add device link of %s\n",
 				dev_name(client->sysmmus[i]->dev));
-			while (i-- > 0)
-				device_link_del(client->dev_link[i]);
-			kfree(client->dev_link);
-			client->dev_link = NULL;
-			return ERR_PTR(-EINVAL);
+			ret = -EINVAL;
+			goto free_client;
 		}
 		dev_dbg(dev, "device link to %s\n",
 			dev_name(client->sysmmus[i]->dev));
 	}
 
+	dev_iommu_priv_set(dev, client);
 	return &client->sysmmus[0]->iommu;
+
+free_client:
+	samsung_sysmmu_clientdata_free(client);
+	return ERR_PTR(ret);
 }
 
 static void samsung_sysmmu_release_device(struct device *dev)
@@ -936,10 +985,8 @@ static void samsung_sysmmu_release_device(struct device *dev)
 		client->domain = NULL;
 	}
 	mutex_unlock(&sysmmu_attach_lock);
-	for (i = 0; client->dev_link && i < client->sysmmu_count; i++)
-		device_link_del(client->dev_link[i]);
-	kfree(client->dev_link);
-	client->dev_link = NULL;
+	dev_iommu_priv_set(dev, NULL);
+	samsung_sysmmu_clientdata_free(client);
 }
 
 static void samsung_sysmmu_group_data_release(void *iommu_data)
@@ -1010,68 +1057,15 @@ out_get_group:
 	return group;
 }
 
-static void samsung_sysmmu_clientdata_release(struct device *dev, void *res)
-{
-	struct sysmmu_clientdata *client = res;
-	unsigned int i;
-
-	for (i = 0; i < client->sysmmu_count; i++)
-		put_device(client->sysmmus[i]->dev);
-	kfree(client->sysmmus);
-}
-
 static int samsung_sysmmu_of_xlate(struct device *dev, const struct of_phandle_args *args)
 {
-	struct platform_device *sysmmu = of_find_device_by_node(args->np);
-	struct sysmmu_drvdata *data;
-	struct sysmmu_drvdata **new_link;
-	struct sysmmu_clientdata *client;
-	unsigned int fwid = 0, i;
-	int ret;
+	u32 provider = args->np->phandle;
 
-	if (!sysmmu)
-		return -EPROBE_DEFER;
-	data = platform_get_drvdata(sysmmu);
-	if (!data) {
-		ret = -EPROBE_DEFER;
-		goto put_provider;
-	}
-	ret = iommu_fwspec_add_ids(dev, &fwid, 1);
-	if (ret)
-		goto put_provider;
-	client = dev_iommu_priv_get(dev);
-	if (!client) {
-		client = devres_alloc(samsung_sysmmu_clientdata_release,
-				      sizeof(*client), GFP_KERNEL);
-		if (!client) {
-			ret = -ENOMEM;
-			goto put_provider;
-		}
-		/* The client, not its first supplier, owns the complete provider list. */
-		devres_add(dev, client);
-		dev_iommu_priv_set(dev, client);
-	}
-	for (i = 0; i < client->sysmmu_count; i++) {
-		if (client->sysmmus[i] == data) {
-			ret = 0;
-			goto put_provider;
-		}
-	}
-	new_link = krealloc_array(client->sysmmus, client->sysmmu_count + 1,
-				 sizeof(*new_link), GFP_KERNEL);
-	if (!new_link) {
-		ret = -ENOMEM;
-		goto put_provider;
-	}
-	client->sysmmus = new_link;
-	/* Retain of_find_device_by_node's device reference until client release. */
-	client->sysmmus[client->sysmmu_count++] = data;
-	dev_info(dev, "has sysmmu %s (total count:%u)\n",
-		 dev_name(data->dev), client->sysmmu_count);
-	return 0;
-put_provider:
-	put_device(&sysmmu->dev);
-	return ret;
+	if (args->args_count || !provider)
+		return -EINVAL;
+
+	/* Firmware IDs identify providers; allocate client state only at IOMMU probe. */
+	return iommu_fwspec_add_ids(dev, &provider, 1);
 }
 
 /* sysmmu_attach_lock serializes this with every domain replacement. */
