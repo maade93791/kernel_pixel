@@ -5315,6 +5315,12 @@ static const struct drm_bridge_funcs exynos_panel_bridge_funcs = {
 	.mode_set = exynos_panel_bridge_mode_set,
 };
 
+void *__devm_exynos_panel_alloc(struct device *dev, size_t size, size_t bridge_offset)
+{
+	return __devm_drm_bridge_alloc(dev, size, bridge_offset, &exynos_panel_bridge_funcs);
+}
+EXPORT_SYMBOL_GPL(__devm_exynos_panel_alloc);
+
 #ifdef CONFIG_OF
 static void devm_backlight_release(void *data)
 {
@@ -5811,7 +5817,6 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 
 	drm_panel_add(&ctx->panel);
 
-	ctx->bridge.funcs = &exynos_panel_bridge_funcs;
 #ifdef CONFIG_OF
 	ctx->bridge.of_node = ctx->dev->of_node;
 #endif
@@ -5871,9 +5876,9 @@ int exynos_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct exynos_panel *ctx;
 
-	ctx = devm_kzalloc(&dsi->dev, sizeof(struct exynos_panel), GFP_KERNEL);
-	if (!ctx)
-		return -ENOMEM;
+	ctx = devm_exynos_panel_alloc(&dsi->dev, struct exynos_panel, bridge);
+	if (IS_ERR(ctx))
+		return PTR_ERR(ctx);
 
 	return exynos_panel_common_init(dsi, ctx);
 }
