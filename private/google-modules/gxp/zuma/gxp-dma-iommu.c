@@ -534,11 +534,3 @@ u64 gxp_dma_encode_gcip_map_flags(uint gxp_dma_flags, unsigned long dma_attrs)
 
 	return gcip_iommu_encode_gcip_map_flags(dir, coherent, dma_attrs, restrict_iova, mmio);
 }
-
-int gxp_iommu_fault_handler(struct iommu_domain *domain, struct device *dev, unsigned long iova,
-			    int flags, void *token)
-{
-	dev_dbg(dev, "IOMMU fault on address %08lX. flags = %08X", iova, flags);
-	/* Tell the IOMMU driver we are OK with this fault. */
-	return 0;
-}
