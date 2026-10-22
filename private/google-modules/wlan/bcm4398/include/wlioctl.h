@@ -915,7 +915,7 @@ typedef struct wl_scan_params_v1 {
 					 * parameter portion is assumed, otherwise ssid in
 					 * the fixed portion is ignored
 					 */
-	uint16 channel_list[BCM_FLEX_ARRAY];
+	uint16 channel_list[];
 } wl_scan_params_v1_t;
 
 /** size of wl_scan_params_v1 not including variable length array */

@@ -791,7 +791,7 @@ struct wl_scan_params {
 					 * parameter portion is assumed, otherwise ssid in
 					 * the fixed portion is ignored
 					 */
-	uint16 channel_list[1];		/**< list of chanspecs */
+	uint16 channel_list[];		/**< list of chanspecs */
 };
 
 /* changes in wl_scan_params_v2 as comapred to wl_scan_params (v1)
@@ -837,13 +837,15 @@ typedef struct wl_scan_params_v2 {
 					 * parameter portion is assumed, otherwise ssid in
 					 * the fixed portion is ignored
 					 */
-	uint16 channel_list[1];		/**< list of chanspecs */
+	uint16 channel_list[];		/**< list of chanspecs */
 } wl_scan_params_v2_t;
 
 #define WL_SCAN_PARAMS_VERSION_V2		2
 
 /** size of wl_scan_params not including variable length array */
 #define WL_SCAN_PARAMS_V2_FIXED_SIZE	(OFFSETOF(wl_scan_params_v2_t, channel_list))
+/* Retain the length historically sent with the one-channel version 2 header. */
+#define WL_SCAN_PARAMS_V2_LEGACY_LENGTH	76
 #define WL_MAX_ROAMSCAN_DATSZ	\
 	(WL_SCAN_PARAMS_FIXED_SIZE + (WL_NUMCHANNELS * sizeof(uint16)))
 #define WL_MAX_ROAMSCAN_V2_DATSZ \
