@@ -1358,9 +1358,9 @@ static int ana6707_f10_panel_probe(struct mipi_dsi_device *dsi)
 	struct ana6707_f10_panel *spanel;
 	int ret;
 
-	spanel = devm_kzalloc(dev, sizeof(*spanel), GFP_KERNEL);
-	if (!spanel)
-		return -ENOMEM;
+	spanel = devm_exynos_panel_alloc(dev, struct ana6707_f10_panel, base.bridge);
+	if (IS_ERR(spanel))
+		return PTR_ERR(spanel);
 
 	spanel->auto_mode_vrefresh = 0;
 	spanel->delayed_idle = false;
