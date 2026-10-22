@@ -12,6 +12,7 @@
 		compatible = "google,darwinn";
 		#dma-address-cells = <1>;
 		#dma-size-cells = <1>;
+		pasid-num-bits = <3>;
 		/* TPU uses regions under 0x18000000 for special purpose */
 		dma-window = <0x18000000 0xE7FFF000>;
 		reg = <0x0 0x1CE00000 0x200000
