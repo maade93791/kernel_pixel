@@ -847,13 +847,14 @@ static phys_addr_t samsung_sysmmu_iova_to_phys(struct iommu_domain *dom,
 	return phys;
 }
 
-static void samsung_sysmmu_clientdata_free(struct sysmmu_clientdata *client)
+static void samsung_sysmmu_clientdata_free(struct device *dev, struct sysmmu_clientdata *client)
 {
 	unsigned int i;
 
 	for (i = 0; i < client->sysmmu_count; i++) {
+		/* Device removal may have purged this link before IOMMU release. */
 		if (client->dev_link && client->dev_link[i])
-			device_link_del(client->dev_link[i]);
+			device_link_remove(dev, client->sysmmus[i]->dev);
 		put_device(client->sysmmus[i]->dev);
 	}
 	kfree(client->dev_link);
@@ -934,7 +935,7 @@ static struct iommu_device *samsung_sysmmu_probe_device(struct device *dev)
 	return &client->sysmmus[0]->iommu;
 
 free_client:
-	samsung_sysmmu_clientdata_free(client);
+	samsung_sysmmu_clientdata_free(dev, client);
 	return ERR_PTR(ret);
 }
 
@@ -986,7 +987,7 @@ static void samsung_sysmmu_release_device(struct device *dev)
 	}
 	mutex_unlock(&sysmmu_attach_lock);
 	dev_iommu_priv_set(dev, NULL);
-	samsung_sysmmu_clientdata_free(client);
+	samsung_sysmmu_clientdata_free(dev, client);
 }
 
 static void samsung_sysmmu_group_data_release(void *iommu_data)
