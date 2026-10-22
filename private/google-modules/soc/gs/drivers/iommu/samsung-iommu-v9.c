@@ -1021,8 +1021,9 @@ static void samsung_sysmmu_release_device(struct device *dev)
 		client->domain = NULL;
 	}
 	mutex_unlock(&sysmmu_attach_lock);
+	/* Device removal may have purged these links before IOMMU release. */
 	for (i = 0; client->dev_link && i < client->sysmmu_count; i++)
-		device_link_del(client->dev_link[i]);
+		device_link_remove(dev, client->sysmmus[i]->dev);
 	kfree(client->dev_link);
 	client->dev_link = NULL;
 }
