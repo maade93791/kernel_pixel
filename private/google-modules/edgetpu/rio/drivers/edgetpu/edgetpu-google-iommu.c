@@ -120,30 +120,13 @@ static int edgetpu_iommu_dev_fault_handler(const struct samsung_iommu_fault *fau
 	return -EAGAIN;
 }
 
-static int edgetpu_iommu_fault_handler(struct iommu_domain *domain, struct device *dev,
-				       unsigned long iova, int flags, void *token)
-{
-	struct edgetpu_iommu_domain *etdomain = token;
-	struct edgetpu_dev *etdev = etdomain->etdev;
-	uint pasid = etdomain->pasid;
-
-	/* Log debugging info */
-	if (pasid)
-		edgetpu_device_group_handle_fault(etdev, iova, pasid,
-						  !!(flags & IOMMU_FAULT_WRITE));
-	/* Tell IOMMU driver we handled the fault, no need to dump SMMU event. */
-	return 0;
-}
-
 static void edgetpu_init_etdomain(struct edgetpu_iommu_domain *etdomain, struct edgetpu_dev *etdev,
 				  struct gcip_iommu_domain *gdomain, uint pasid)
 {
-	struct iommu_domain *domain = gdomain->domain;
-
+	/* Hardware faults are dispatched through the device fault handler. */
 	etdomain->etdev = etdev;
 	etdomain->gdomain = gdomain;
 	etdomain->pasid = pasid;
-	iommu_set_fault_handler(domain, edgetpu_iommu_fault_handler, etdomain);
 }
 
 /*
