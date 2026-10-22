@@ -2347,6 +2347,8 @@ static const struct drm_bridge_funcs panel_bridge_funcs = {
 	.mode_set = panel_bridge_mode_set,
 };
 
+static void unregister_panel_bridge(void *data);
+
 static int register_panel_bridge(struct goog_touch_interface *gti)
 {
 	GOOG_LOGI(gti, "\n");
@@ -2356,35 +2358,29 @@ static int register_panel_bridge(struct goog_touch_interface *gti)
 #ifdef CONFIG_OF
 	gti->panel_bridge.of_node = gti->vendor_dev->of_node;
 #endif
-	gti->panel_bridge.funcs = &panel_bridge_funcs;
 	drm_bridge_add(&gti->panel_bridge);
-
-	return 0;
+	return devm_add_action_or_reset(gti->vendor_dev, unregister_panel_bridge,
+				       &gti->panel_bridge);
 }
 
-static void unregister_panel_bridge(struct drm_bridge *bridge)
+static void unregister_panel_bridge(void *data)
 {
+	struct drm_bridge *bridge = data;
 	struct goog_touch_interface *gti =
 		container_of(bridge, struct goog_touch_interface, panel_bridge);
-	struct drm_bridge *node;
+	struct drm_device *drm;
 
 	GOOG_LOGI(gti, "\n");
 	drm_bridge_remove(bridge);
 
-	if (!bridge->dev) /* not attached */
+	drm = bridge->dev;
+	if (!drm) /* not attached */
 		return;
 
-	drm_modeset_lock(&bridge->dev->mode_config.connection_mutex, NULL);
-	list_for_each_entry(node, &bridge->encoder->bridge_chain, chain_node) {
-		if (node == bridge) {
-			if (bridge->funcs->detach)
-				bridge->funcs->detach(bridge);
-			list_del(&bridge->chain_node);
-			break;
-		}
-	}
-	drm_modeset_unlock(&bridge->dev->mode_config.connection_mutex);
-	bridge->dev = NULL;
+	drm_modeset_lock(&drm->mode_config.connection_mutex, NULL);
+	if (bridge->dev == drm)
+		drm_bridge_detach(bridge);
+	drm_modeset_unlock(&drm->mode_config.connection_mutex);
 }
 
 /*-----------------------------------------------------------------------------
@@ -5078,8 +5074,6 @@ static int goog_init_variable_report_rate(struct goog_touch_interface *gti)
 
 	gti->report_rate_setting = gti->touch_report_rate_table[0];
 	gti->report_rate_setting_next = gti->touch_report_rate_table[0];
-	INIT_DELAYED_WORK(&gti->set_report_rate_work, goog_set_report_rate_work);
-
 	return 0;
 
 init_variable_report_rate_failed:
@@ -5282,6 +5276,42 @@ int goog_request_threaded_irq(struct goog_touch_interface *gti,
 }
 EXPORT_SYMBOL_GPL(goog_request_threaded_irq);
 
+static void goog_touch_interface_cleanup(struct goog_touch_interface *gti)
+{
+	sysfs_remove_group(&gti->dev->kobj, &goog_attr_group);
+
+	if (gti->event_wq) {
+		disable_work_sync(&gti->set_op_hz_work);
+		disable_work_sync(&gti->pm.state_update_work);
+		disable_delayed_work_sync(&gti->set_report_rate_work);
+		if (gti->lptw_suppress_coords_enabled)
+			disable_delayed_work_sync(&gti->lptw_cancel_delayed_work);
+		destroy_workqueue(gti->event_wq);
+		gti->event_wq = NULL;
+	}
+
+	goog_pm_remove(gti);
+
+	if (gti->tbn_enabled && gti->tbn_register_mask)
+		unregister_tbn(&gti->tbn_register_mask);
+
+	goog_offload_remove(gti);
+
+	sysfs_remove_link(&gti->dev->kobj, "vendor");
+	sysfs_remove_link(&gti->dev->kobj, "vendor_input");
+	device_destroy(gti_class, gti->dev_id);
+	gti->dev = NULL;
+	gti_dev_num--;
+	unregister_chrdev_region(gti->dev_id, 1);
+
+	if (!gti_dev_num) {
+		proc_remove(gti_proc_dir_root);
+		gti_proc_dir_root = NULL;
+		class_destroy(gti_class);
+		gti_class = NULL;
+	}
+}
+
 struct goog_touch_interface *goog_touch_interface_probe(
 		void *private_data,
 		struct device *dev,
@@ -5292,92 +5322,101 @@ struct goog_touch_interface *goog_touch_interface_probe(
 {
 	int ret;
 	struct goog_touch_interface *gti;
+	u32 dev_id = gti_dev_num;
+	char *name;
 
 	if (!dev || !input_dev || !default_handler) {
 		pr_err("%s: error: invalid dev/input_dev or default_handler!\n", __func__);
 		return NULL;
 	}
 
-	gti = devm_kzalloc(dev, sizeof(struct goog_touch_interface), GFP_KERNEL);
-	if (gti) {
-		gti->vendor_private_data = private_data;
-		gti->vendor_dev = dev;
-		gti->vendor_input_dev = input_dev;
-		gti->vendor_default_handler = default_handler;
-		mutex_init(&gti->input_lock);
-		mutex_init(&gti->input_process_lock);
-		mutex_init(&gti->input_heatmap_lock);
+	gti = devm_drm_bridge_alloc(dev, struct goog_touch_interface,
+				    panel_bridge, &panel_bridge_funcs);
+	if (IS_ERR(gti))
+		return NULL;
 
-		gti->event_wq = alloc_workqueue(
-			"gti_wq", WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE, 1);
-		if (!gti->event_wq) {
-			GOOG_ERR(gti, "Fail to create work thread for gti!\n");
-			return NULL;
-		}
+	gti->vendor_private_data = private_data;
+	gti->vendor_dev = dev;
+	gti->vendor_input_dev = input_dev;
+	gti->vendor_default_handler = default_handler;
+	mutex_init(&gti->input_lock);
+	mutex_init(&gti->input_process_lock);
+	mutex_init(&gti->input_heatmap_lock);
+	INIT_DELAYED_WORK(&gti->set_report_rate_work, goog_set_report_rate_work);
+
+	gti->event_wq = alloc_workqueue(
+		"gti_wq", WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE, 1);
+	if (!gti->event_wq) {
+		GOOG_ERR(gti, "Fail to create work thread for gti!\n");
+		return NULL;
 	}
 
-	if (!gti_class)
+	if (!gti_class) {
 		gti_class = class_create(GTI_NAME);
-
-	if (gti && gti_class) {
-		u32 dev_id = gti_dev_num;
-		char *name;
-
-		if (gti->vendor_dev) {
-			struct device_node *np = gti->vendor_dev->of_node;
-
-			of_property_read_u32(np, "goog,dev-id", &dev_id);
+		if (IS_ERR(gti_class)) {
+			gti_class = NULL;
+			goto err_workqueue;
 		}
-		name = kasprintf(GFP_KERNEL, "gti.%d", dev_id);
+	}
 
-		if (name &&
-			!alloc_chrdev_region(&gti->dev_id, 0, 1, name)) {
-			gti->dev = device_create(gti_class, NULL,
-					gti->dev_id, gti, name);
-			if (gti->dev) {
-				gti_dev_num++;
-				GOOG_LOGI(gti, "device create \"%s\".\n", name);
-				if (gti->vendor_dev) {
-					ret = sysfs_create_link(&gti->dev->kobj,
-						&gti->vendor_dev->kobj, "vendor");
-					if (ret) {
-						GOOG_ERR(gti, "sysfs_create_link() failed for vendor, ret=%d!\n",
-							ret);
-					}
-				}
-				if (gti->vendor_input_dev) {
-					ret = sysfs_create_link(&gti->dev->kobj,
-						&gti->vendor_input_dev->dev.kobj, "vendor_input");
-					if (ret) {
-						GOOG_ERR(gti, "sysfs_create_link() failed for vendor_input, ret=%d!\n",
-							 ret);
-					}
-				}
-			}
-		}
+	of_property_read_u32(dev->of_node, "goog,dev-id", &dev_id);
+	name = kasprintf(GFP_KERNEL, "gti.%d", dev_id);
+	if (!name)
+		goto err_class;
+
+	ret = alloc_chrdev_region(&gti->dev_id, 0, 1, name);
+	if (ret) {
 		kfree(name);
+		goto err_class;
 	}
 
-	if (gti && gti->dev) {
-		goog_init_proc(gti);
-		goog_init_options(gti, options);
-		goog_offload_probe(gti);
-		/*
-		 * goog_init_input() needs the offload.cap initialization by goog_offload_probe().
-		 */
-		goog_init_input(gti);
-		goog_register_tbn(gti);
-		goog_pm_probe(gti);
-		register_panel_bridge(gti);
-		goog_init_variable_report_rate(gti);
-		goog_update_fw_settings(gti, true);
-
-		ret = sysfs_create_group(&gti->dev->kobj, &goog_attr_group);
-		if (ret)
-			GOOG_ERR(gti, "sysfs_create_group() failed, ret= %d!\n", ret);
+	gti->dev = device_create(gti_class, NULL, gti->dev_id, gti, "%s", name);
+	kfree(name);
+	if (IS_ERR(gti->dev)) {
+		gti->dev = NULL;
+		unregister_chrdev_region(gti->dev_id, 1);
+		goto err_class;
 	}
+	gti_dev_num++;
+	GOOG_LOGI(gti, "device create \"%s\".\n", dev_name(gti->dev));
+
+	ret = sysfs_create_link(&gti->dev->kobj, &dev->kobj, "vendor");
+	if (ret)
+		GOOG_ERR(gti, "sysfs_create_link() failed for vendor, ret=%d!\n", ret);
+	ret = sysfs_create_link(&gti->dev->kobj, &input_dev->dev.kobj, "vendor_input");
+	if (ret)
+		GOOG_ERR(gti, "sysfs_create_link() failed for vendor_input, ret=%d!\n", ret);
+
+	goog_init_proc(gti);
+	goog_init_options(gti, options);
+	goog_offload_probe(gti);
+	/* goog_init_input() needs the capabilities initialized by goog_offload_probe(). */
+	goog_init_input(gti);
+	goog_register_tbn(gti);
+	goog_pm_probe(gti);
+	ret = register_panel_bridge(gti);
+	if (ret) {
+		goog_touch_interface_cleanup(gti);
+		return NULL;
+	}
+	goog_init_variable_report_rate(gti);
+	goog_update_fw_settings(gti, true);
+
+	ret = sysfs_create_group(&gti->dev->kobj, &goog_attr_group);
+	if (ret)
+		GOOG_ERR(gti, "sysfs_create_group() failed, ret= %d!\n", ret);
 
 	return gti;
+
+err_class:
+	if (!gti_dev_num) {
+		class_destroy(gti_class);
+		gti_class = NULL;
+	}
+err_workqueue:
+	destroy_workqueue(gti->event_wq);
+	gti->event_wq = NULL;
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(goog_touch_interface_probe);
 
@@ -5386,41 +5425,8 @@ int goog_touch_interface_remove(struct goog_touch_interface *gti)
 	if (!gti)
 		return -ENODEV;
 
-	if (gti->event_wq) {
-		destroy_workqueue(gti->event_wq);
-		gti->event_wq = NULL;
-	}
-
-	unregister_panel_bridge(&gti->panel_bridge);
-	goog_pm_remove(gti);
-
-	if (gti->tbn_enabled && gti->tbn_register_mask)
-		unregister_tbn(&gti->tbn_register_mask);
-
-	goog_offload_remove(gti);
-
-	if (gti->dev) {
-		sysfs_remove_group(&gti->dev->kobj, &goog_attr_group);
-		if (gti->vendor_dev)
-			sysfs_remove_link(&gti->dev->kobj, "vendor");
-		if (gti->vendor_input_dev)
-			sysfs_remove_link(&gti->dev->kobj, "vendor_input");
-		device_destroy(gti_class, gti->dev_id);
-		gti->dev = NULL;
-		gti_dev_num--;
-	}
-
-	if (gti_class) {
-		unregister_chrdev_region(gti->dev_id, 1);
-		if (!gti_dev_num) {
-			proc_remove(gti_proc_dir_root);
-			gti_proc_dir_root = NULL;
-			class_destroy(gti_class);
-			gti_class = NULL;
-		}
-	}
-
-	devm_kfree(gti->vendor_dev, gti);
+	devm_release_action(gti->vendor_dev, unregister_panel_bridge, &gti->panel_bridge);
+	goog_touch_interface_cleanup(gti);
 
 	return 0;
 }
