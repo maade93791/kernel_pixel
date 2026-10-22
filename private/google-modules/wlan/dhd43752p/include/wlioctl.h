@@ -9675,7 +9675,7 @@ typedef struct pcie_hmap {
 /** Input structure for pwrstats IOVAR */
 typedef struct wl_pwrstats_query {
 	uint16 length;		/**< Number of entries in type array. */
-	uint16 type[1];		/**< Types (tags) to retrieve.
+	uint16 type[];		/**< Types (tags) to retrieve.
 				 * Length 0 (no types) means get all.
 				 */
 } wl_pwrstats_query_t;
