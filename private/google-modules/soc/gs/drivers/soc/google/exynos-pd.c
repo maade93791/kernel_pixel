@@ -544,6 +544,8 @@ static void dev_sync_state(struct device *dev)
 
 	pd = platform_get_drvdata(to_platform_device(dev));
 	exynos_pd_sync_state(pd);
+	/* The native provider callback cannot replace our custom sync callback. */
+	of_genpd_sync_state(dev->of_node);
 }
 
 static const struct of_device_id of_exynos_pd_match[] = {
