@@ -175,7 +175,8 @@ void set_next_buddy(struct sched_entity *se)
 	for_each_sched_entity(se) {
 		if (VENDOR_SCHED_WARN_ON(!se->on_rq))
 			return;
-		if (se_is_idle(se))
+		/* Delayed entities remain on_rq but must not become next buddies. */
+		if (se->sched_delayed || se_is_idle(se))
 			return;
 		cfs_rq_of(se)->next = se;
 	}
