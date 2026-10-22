@@ -623,9 +623,9 @@ static int ea8182_f10_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct ea8182_f10_panel *spanel;
 
-	spanel = devm_kzalloc(&dsi->dev, sizeof(*spanel), GFP_KERNEL);
-	if (!spanel)
-		return -ENOMEM;
+	spanel = devm_exynos_panel_alloc(&dsi->dev, struct ea8182_f10_panel, base.bridge);
+	if (IS_ERR(spanel))
+		return PTR_ERR(spanel);
 
 	spanel->is_pixel_off = false;
 

@@ -573,9 +573,9 @@ static int ts110f5mlg0_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct ts110f5mlg0_panel *spanel;
 
-	spanel = devm_kzalloc(&dsi->dev, sizeof(*spanel), GFP_KERNEL);
-	if (!spanel)
-		return -ENOMEM;
+	spanel = devm_exynos_panel_alloc(&dsi->dev, struct ts110f5mlg0_panel, base.bridge);
+	if (IS_ERR(spanel))
+		return PTR_ERR(spanel);
 
 	return exynos_panel_common_init(dsi, &spanel->base);
 }

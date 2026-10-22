@@ -1000,9 +1000,9 @@ static int shoreline_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct shoreline_panel *spanel;
 
-	spanel = devm_kzalloc(&dsi->dev, sizeof(*spanel), GFP_KERNEL);
-	if (!spanel)
-		return -ENOMEM;
+	spanel = devm_exynos_panel_alloc(&dsi->dev, struct shoreline_panel, base.bridge);
+	if (IS_ERR(spanel))
+		return PTR_ERR(spanel);
 
 	spanel->base.op_hz = 120;
 
