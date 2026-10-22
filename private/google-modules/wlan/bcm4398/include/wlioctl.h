@@ -19078,7 +19078,7 @@ typedef struct wl_el_set_all_type_s_v1 {
 	uint16	version;
 	uint16	len;
 	uint32	max_sets;
-	wl_el_set_type_v1_t set_type[BCM_FLEX_ARRAY]; /* set-Type Values Array */
+	wl_el_set_type_v1_t set_type[]; /* set-Type Values Array */
 } wl_el_set_all_type_v1_t;
 
 typedef struct wl_staprio_cfg {
