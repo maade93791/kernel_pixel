@@ -633,9 +633,9 @@ static int ct3c_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct ct3c_panel *spanel;
 
-	spanel = devm_kzalloc(&dsi->dev, sizeof(*spanel), GFP_KERNEL);
-	if (!spanel)
-		return -ENOMEM;
+	spanel = devm_gs_panel_alloc(&dsi->dev, struct ct3c_panel, base.bridge);
+	if (IS_ERR(spanel))
+		return PTR_ERR(spanel);
 
 	/*
 		When refresh rate = 120Hz, op rate = 120 (120Hz HS)

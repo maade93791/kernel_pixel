@@ -945,9 +945,9 @@ static int tg4a_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct tg4a_panel *spanel;
 
-	spanel = devm_kzalloc(&dsi->dev, sizeof(*spanel), GFP_KERNEL);
-	if (!spanel)
-		return -ENOMEM;
+	spanel = devm_gs_panel_alloc(&dsi->dev, struct tg4a_panel, base.bridge);
+	if (IS_ERR(spanel))
+		return PTR_ERR(spanel);
 
 	spanel->is_pixel_off = false;
 

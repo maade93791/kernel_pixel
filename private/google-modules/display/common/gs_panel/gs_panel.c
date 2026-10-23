@@ -1759,6 +1759,12 @@ static void gs_panel_init_te2(struct gs_panel *ctx)
 	ctx->te2.option = TEX_OPT_CHANGEABLE;
 }
 
+void *__devm_gs_panel_alloc(struct device *dev, size_t size, size_t offset)
+{
+	return __devm_drm_bridge_alloc(dev, size, offset, get_panel_drm_bridge_funcs());
+}
+EXPORT_SYMBOL_GPL(__devm_gs_panel_alloc);
+
 int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 {
 	struct device *dev = &dsi->dev;
@@ -1880,7 +1886,9 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 #if IS_ENABLED(CONFIG_OF)
 	ctx->bridge.of_node = ctx->gs_connector->kdev->of_node;
 #endif
-	devm_drm_bridge_add(dev, &ctx->bridge);
+	ret = devm_drm_bridge_add(dev, &ctx->bridge);
+	if (ret)
+		goto err_panel;
 
 	/* Parse device tree - Backlight */
 	ret = gs_panel_of_parse_backlight(ctx);
@@ -1889,8 +1897,6 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 		goto err_panel;
 	}
 
-	/* Attach bridge funcs */
-	ctx->bridge.funcs = get_panel_drm_bridge_funcs();
 	ctx->sw_status.te.option = TEX_OPT_CHANGEABLE;
 	ctx->sw_status.te.rate_hz = 60;
 
@@ -1932,9 +1938,9 @@ int gs_dsi_panel_common_probe(struct mipi_dsi_device *dsi)
 {
 	struct gs_panel *ctx;
 
-	ctx = devm_kzalloc(&dsi->dev, sizeof(*ctx), GFP_KERNEL);
-	if (!ctx)
-		return -ENOMEM;
+	ctx = devm_gs_panel_alloc(&dsi->dev, struct gs_panel, bridge);
+	if (IS_ERR(ctx))
+		return PTR_ERR(ctx);
 
 	return gs_dsi_panel_common_init(dsi, ctx);
 }
