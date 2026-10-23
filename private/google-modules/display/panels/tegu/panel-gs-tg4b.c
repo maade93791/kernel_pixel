@@ -683,9 +683,9 @@ static int tg4b_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct gs_panel *panel;
 
-	panel = devm_kzalloc(&dsi->dev, sizeof(*panel), GFP_KERNEL);
-	if (!panel)
-		return -ENOMEM;
+	panel = devm_gs_panel_alloc(&dsi->dev, struct gs_panel, bridge);
+	if (IS_ERR(panel))
+		return PTR_ERR(panel);
 
 	return gs_dsi_panel_common_init(dsi, panel);
 }

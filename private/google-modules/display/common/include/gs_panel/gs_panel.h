@@ -1553,10 +1553,27 @@ static inline int gs_dcs_set_brightness(struct gs_panel *ctx, u16 br)
 int gs_panel_first_enable_helper(struct gs_panel *ctx);
 void gs_panel_reset_helper(struct gs_panel *ctx);
 int gs_panel_set_power_helper(struct gs_panel *ctx, bool on);
+
+void *__devm_gs_panel_alloc(struct device *dev, size_t size, size_t offset);
+
+/**
+ * devm_gs_panel_alloc - allocate a panel with a reference-counted DRM bridge
+ * @dev: device that owns the panel
+ * @type: type of the complete panel object
+ * @member: name of the embedded struct drm_bridge member
+ *
+ * Allocate the complete panel object through the DRM bridge allocator so the
+ * embedded bridge and its panel context share the same lifetime.
+ *
+ * Return: Pointer to the zeroed panel object, or an ERR_PTR() on failure.
+ */
+#define devm_gs_panel_alloc(dev, type, member) \
+	((type *)__devm_gs_panel_alloc(dev, sizeof(type), offsetof(type, member)))
+
 /**
  * gs_dsi_panel_common_init - Probe-level initialization for gs_panel
  * @dsi: dsi device pointer for panel
- * @ctx: Preallocated memory for gs_panel object
+ * @ctx: Panel object allocated with devm_gs_panel_alloc()
  *
  * This function performs a wide range of initialization functions at probe time
  * for gs_panel objects, including creating mutexes, parsing the device tree,
@@ -1570,7 +1587,7 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx);
  * @dsi: dsi device pointer for panel
  *
  * For drivers that don't need additional working state data for their panels,
- * this function calls the `kzalloc` function to allocate a `gs_panel` before
+ * this function calls devm_gs_panel_alloc() to allocate a `gs_panel` before
  * sending that to the `gs_dsi_panel_common_init` function.
  *
  * It is designed to plug directly into the `probe` function of the
