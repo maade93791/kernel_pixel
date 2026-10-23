@@ -608,7 +608,7 @@ static struct kunit_suite max77779_bcl_irq_test_suite = {
 
 kunit_test_suite(max77779_bcl_irq_test_suite);
 
-MODULE_IMPORT_NS(EXPORTED_FOR_KUNIT_TESTING);
+MODULE_IMPORT_NS("EXPORTED_FOR_KUNIT_TESTING");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Allen Jiang <alljiang@google.com>");
 MODULE_AUTHOR("Hiroshi Akiyama <hiroshiakiyama@google.com>");

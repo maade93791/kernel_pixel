@@ -55,7 +55,7 @@ static void __exit santafe_exit(void)
 }
 
 MODULE_DESCRIPTION("Google SantaFe Edge TPU driver");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 MODULE_LICENSE("GPL");
 module_init(santafe_init);
 module_exit(santafe_exit);

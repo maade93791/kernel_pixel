@@ -796,4 +796,4 @@ module_platform_driver(jpu_driver);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Anastasia Young <anastasiayoung@google.com>");
 MODULE_DESCRIPTION("Codec3P JPU driver");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");

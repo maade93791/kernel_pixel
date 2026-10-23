@@ -139,4 +139,4 @@ void lvm_pktgen_deinit(struct lvm_net *net)
 	kfree(net->pktgen);
 }
 
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
