@@ -1195,7 +1195,6 @@ static int register_panel_bridge(struct fts_ts_data *ts)
 #ifdef CONFIG_OF
     ts->panel_bridge.of_node = ts->spi->dev.of_node;
 #endif
-    ts->panel_bridge.funcs = &panel_bridge_funcs;
     drm_bridge_add(&ts->panel_bridge);
     FTS_FUNC_EXIT();
     return 0;
@@ -1203,24 +1202,19 @@ static int register_panel_bridge(struct fts_ts_data *ts)
 
 static void unregister_panel_bridge(struct drm_bridge *bridge)
 {
-    struct drm_bridge *node;
+    struct drm_device *drm;
 
     FTS_FUNC_ENTER();
     drm_bridge_remove(bridge);
 
-    if (!bridge->dev) /* not attached */
+    drm = bridge->dev;
+    if (!drm) /* not attached */
         return;
 
-    drm_modeset_lock(&bridge->dev->mode_config.connection_mutex, NULL);
-    list_for_each_entry(node, &bridge->encoder->bridge_chain, chain_node)
-        if (node == bridge) {
-            if (bridge->funcs->detach)
-                bridge->funcs->detach(bridge);
-            list_del(&bridge->chain_node);
-            break;
-        }
-    drm_modeset_unlock(&bridge->dev->mode_config.connection_mutex);
-    bridge->dev = NULL;
+    drm_modeset_lock(&drm->mode_config.connection_mutex, NULL);
+    if (bridge->dev == drm)
+        drm_bridge_detach(bridge);
+    drm_modeset_unlock(&drm->mode_config.connection_mutex);
     FTS_FUNC_EXIT();
 }
 #endif
@@ -3320,7 +3314,9 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
     kfree_safe(ts_data->events);
 
     kfree_safe(ts_data->pdata);
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_PANEL_BRIDGE)
     kfree_safe(ts_data);
+#endif
 
     FTS_FUNC_EXIT();
 
@@ -3797,12 +3793,19 @@ static int fts_ts_probe(struct spi_device *spi)
         return ret;
     }
 
-    /* malloc memory for global struct variable */
-    ts_data = (struct fts_ts_data *)kzalloc(sizeof(*ts_data), GFP_KERNEL);
+    /* The embedded DRM bridge owns this allocation when enabled. */
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_PANEL_BRIDGE)
+    ts_data = devm_drm_bridge_alloc(&spi->dev, struct fts_ts_data,
+                                    panel_bridge, &panel_bridge_funcs);
+    if (IS_ERR(ts_data))
+        return PTR_ERR(ts_data);
+#else
+    ts_data = kzalloc(sizeof(*ts_data), GFP_KERNEL);
     if (!ts_data) {
         FTS_ERROR("allocate memory for fts_data fail");
         return -ENOMEM;
     }
+#endif
 
     fts_data = ts_data;
     ts_data->spi = spi;
@@ -3815,7 +3818,9 @@ static int fts_ts_probe(struct spi_device *spi)
     ret = fts_ts_probe_entry(ts_data);
     if (ret) {
         FTS_ERROR("Touch Screen(SPI BUS) driver probe fail");
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_PANEL_BRIDGE)
         kfree_safe(ts_data);
+#endif
         return ret;
     }
 
