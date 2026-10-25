@@ -78,7 +78,7 @@ static void update_vendor_kernel_all_info(void)
 	total_len = sizeof(info->uts_release);
 #if defined(CONFIG_MODULE_SCMVERSION)
 	str_idx = strstr(UTS_RELEASE, "-g");
-	if (str_idx) {
+	if (str_idx && THIS_MODULE->scmversion && *THIS_MODULE->scmversion) {
 		/* let '-' and '\0' are involved in the end. */
 		str_idx += 2;
 
@@ -87,12 +87,14 @@ static void update_vendor_kernel_all_info(void)
 
 		/* append scmversion of external modules */
 		strlcat(info->uts_release, THIS_MODULE->scmversion, total_len);
-	}
 
-	/* append build_id of external modules */
-	str_idx = strstr(UTS_RELEASE, "-ab");
-	if (str_idx)
-		strlcat(info->uts_release, str_idx, total_len);
+		/* append build_id of external modules */
+		str_idx = strstr(UTS_RELEASE, "-ab");
+		if (str_idx)
+			strlcat(info->uts_release, str_idx, total_len);
+	} else {
+		strscpy(info->uts_release, UTS_RELEASE, total_len);
+	}
 
 	/* dirty build w/o -g and -ab */
 	str_idx = strstr(UTS_RELEASE, "-maybe-dirty");
