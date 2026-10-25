@@ -3904,6 +3904,8 @@ void kbase_csf_doorbell_mapping_term(struct kbase_device *kbdev)
 		kbase_mem_pool_free(&kbdev->fw_mem_pools.small, page, false);
 
 		fput(kbdev->csf.db_filp);
+		kbdev->csf.db_filp = NULL;
+		kbdev->csf.dummy_db_page = as_tagged(KBASE_INVALID_PHYSICAL_ADDRESS);
 	}
 }
 
