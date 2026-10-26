@@ -11052,10 +11052,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 		 */
 #ifdef PCIE_INB_DW
 		if (INBAND_DW_ENAB(bus)) {
-#if IS_ENABLED(CONFIG_SOC_LGA)
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
-#endif
 			DHD_BUS_INB_DW_LOCK(bus->inb_lock, flags);
 			DHD_RPM(("%s: Before D3_INFORM inband_dw_state:%d\n",
 				__FUNCTION__, dhdpcie_bus_get_pcie_inband_dw_state(bus)));
@@ -11082,10 +11078,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 		if ((bus->wait_for_d3_ack == 0) && (timeleft == 0) &&
 			!dhd_query_bus_erros(bus->dhd)) {
 			DHD_PRINT(("%s: resumed on timeout for D3 ACK\n", __FUNCTION__));
-#if IS_ENABLED(CONFIG_SOC_LGA)
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
-#endif
 			dhd_plat_pcie_dump_debug();
 			if (dhd_recover_timeout_by_scheduling_dpc(bus)) {
 				timeleft = dhd_os_d3ack_wait(bus->dhd, &bus->wait_for_d3_ack);
@@ -11316,10 +11308,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 			DHD_PRINT(("%s: resumed on timeout for D3 ACK%s d3ackcnt_timeout %d\n",
 				__FUNCTION__, bus->dhd->is_sched_error ?
 				" due to scheduling problem" : "", bus->dhd->d3ackcnt_timeout));
-#if IS_ENABLED(CONFIG_SOC_LGA)
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
-#endif
 			dhd_plat_pcie_dump_debug();
 #if defined(DHD_KERNEL_SCHED_DEBUG) && defined(DHD_FW_COREDUMP)
 			/* DHD triggers Kernel panic if the resumed on timeout occurrs

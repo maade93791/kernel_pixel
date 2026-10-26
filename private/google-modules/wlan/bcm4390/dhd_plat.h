@@ -100,7 +100,6 @@ extern uint32 dhd_plat_get_rc_vendor_id(void);
 extern uint32 dhd_plat_get_rc_device_id(void);
 
 extern int dhd_plat_check_pcie_state(void);
-extern void dhd_plat_check_msi(void);
 
 extern uint16 dhd_plat_align_rxbuf_size(uint16 rxbufpost_sz);
 extern void dhd_plat_pcie_skip_config_set(bool val);

@@ -85,12 +85,6 @@
 #define GOOGLE_PCIE_CH_NUM 0
 #endif /* CONFIG_PCI_EXYNOS_GS */
 
-#if IS_ENABLED(CONFIG_SOC_LGA)
-#define MSI_MASK_REG 0x3c80082c
-#define MSI_STAT_REG 0x3c800830
-#define PCI_ICDS_REG 0x3c009554
-#endif
-
 #if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
 #define CDD_WIFI_STAT_PCIE_LINK_UP BIT(0)
 uint32_t gcdd_wifi_stat;
@@ -159,10 +153,6 @@ extern void exynos_pin_dbg_show(unsigned int pin, const char *str);
 extern void exynos_pcie_set_skip_config(int ch_num, bool val);
 #endif /* DHD_TREAT_D3ACKTO_AS_LINKDWN */
 #endif /* CONFIG_PCI_EXYNOS_GS */
-
-#if IS_ENABLED(CONFIG_SOC_LGA)
-extern void google_pcie_dump_debug(int num);
-#endif /* CONFIG_SOC_LGA */
 
 #ifdef DHD_COREDUMP
 #define DEVICE_NAME "wlan"
@@ -973,23 +963,12 @@ uint32 dhd_cpufreq_boost;
 module_param(dhd_cpufreq_boost, uint, 0660);
 
 #define DHD_CPUFREQ_LITTLE      0u
-#if IS_ENABLED(CONFIG_SOC_LGA)
-#define DHD_CPUFREQ_BIG         4u
-#define DHD_CPUFREQ_BIGGER      5u
-#else
 #define DHD_CPUFREQ_BIG         4u
 #define DHD_CPUFREQ_BIGGER      7u
-#endif
 
-#if IS_ENABLED(CONFIG_SOC_LGA)
-#define DHD_LITTLE_CORE_PERF_FREQ   2016000u
-#define DHD_MID_CORE_PERF_FREQ      2092000u
-#define DHD_BIG_CORE_PERF_FREQ      2092000u
-#else
 #define DHD_LITTLE_CORE_PERF_FREQ   1548000u
 #define DHD_MID_CORE_PERF_FREQ      1549000u
 #define DHD_BIG_CORE_PERF_FREQ      2363000u
-#endif
 
 enum core_idx {
 	LITTLE = 0,
@@ -1649,47 +1628,6 @@ int dhd_plat_check_pcie_state(void)
 #endif /* CONFIG_PCI_EXYNOS_GS */
 }
 
-void dhd_plat_check_msi(void)
-{
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	u32 __iomem  *reg_ptr;
-	u32 val;
-
-	if (in_interrupt()) {
-		DHD_ERROR(("don't iomap in interrupt context"));
-		return;
-	}
-
-	reg_ptr = ioremap(MSI_MASK_REG, SZ_4);
-	if (!reg_ptr) {
-		DHD_ERROR(("reg_ptr is NULL"));
-		return;
-	}
-	val = ioread32(reg_ptr);
-	DHD_PRINT(("MSI Mask=%#08x\n", val));
-	iounmap(reg_ptr);
-
-	reg_ptr = ioremap(MSI_STAT_REG, SZ_4);
-	if (!reg_ptr) {
-		DHD_ERROR(("reg_ptr is NULL"));
-		return;
-	}
-	val = ioread32(reg_ptr);
-	DHD_PRINT(("MSI Status=%#08x\n", val));
-	iounmap(reg_ptr);
-
-	reg_ptr = ioremap(PCI_ICDS_REG, SZ_4);
-	if (!reg_ptr) {
-		DHD_ERROR(("reg_ptr is NULL"));
-		return;
-	}
-	val = ioread32(reg_ptr);
-	DHD_PRINT(("ICD Status=%#08x\n", val));
-	iounmap(reg_ptr);
-
-#endif /* CONFIG_SOC_LGA */
-}
-
 #define RXBUF_ALLOC_PAGE_SIZE
 uint16 dhd_plat_align_rxbuf_size(uint16 rxbufpost_sz)
 {
@@ -1774,13 +1712,6 @@ dhd_plat_get_wlan_reg_on_gpio(void)
 {
 	return gpio_is_valid(wlan_reg_on) ?
 		gpio_get_value(wlan_reg_on) : -1;
-}
-
-void dhd_plat_pcie_dump_debug(void)
-{
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	google_pcie_dump_debug(pcie_ch_num);
-#endif
 }
 
 #ifndef BCMDHD_MODULAR

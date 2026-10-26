@@ -12201,10 +12201,6 @@ dhd_msgbuf_dump_iovar_name(dhd_pub_t *dhd)
 		"trans_id %d state %d busstate=%d ioctl_received=%d\n",	__FUNCTION__,
 		dhd->rxcnt_timeout, prot->curr_ioctl_cmd, prot->ioctl_trans_id,
 		prot->ioctl_state, dhd->busstate, prot->ioctl_received));
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	DHD_PRINT(("Check MSI Status\n"));
-	dhd_plat_check_msi();
-#endif
 
 	if (prot->curr_ioctl_cmd == WLC_SET_VAR ||
 			prot->curr_ioctl_cmd == WLC_GET_VAR) {
@@ -12299,10 +12295,6 @@ dhd_msgbuf_wait_ioctl_cmplt(dhd_pub_t *dhd, uint32 len, void *buf)
 	}
 	if ((prot->ioctl_received == 0) && (timeleft == 0) && !dhd_query_bus_erros(dhd)) {
 		DHD_PRINT(("%s: resumed on timeout for IOVAR\n", __FUNCTION__));
-#if IS_ENABLED(CONFIG_SOC_LGA)
-		DHD_PRINT(("Check MSI Status\n"));
-		dhd_plat_check_msi();
-#endif
 		dhd_plat_pcie_dump_debug();
 		if (dhd_recover_timeout_by_scheduling_dpc(dhd->bus)) {
 			timeleft = dhd_os_ioctl_resp_wait(dhd, (uint *)&prot->ioctl_received);

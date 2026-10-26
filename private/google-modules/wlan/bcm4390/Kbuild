@@ -418,9 +418,6 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
     ifneq ($(CONFIG_PCI_EXYNOS_GS),)
       DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=6
       DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=7
-    else ifneq ($(CONFIG_SOC_LGA),)
-	  DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=6
-	  DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=7
     else
       DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=0
       DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=0
@@ -461,7 +458,7 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
     DHDCFLAGS += -DDHD_SKIP_COREDUMP_OLDER_CHIPS
     # Skip coredump for continousy pkt drop health check
     DHDCFLAGS += -DSKIP_COREDUMP_PKTDROP_RXHC
-    ifneq ($(filter y m, $(CONFIG_PCI_EXYNOS_GS) $(CONFIG_SOC_LGA)),)
+    ifneq ($(filter y m, $(CONFIG_PCI_EXYNOS_GS)),)
       # Boost host cpufreq to max for peak tput. default is false
       DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST
       # Boost host cpufreq to max for peak tput. default is true
@@ -1129,7 +1126,7 @@ ifneq ($(CONFIG_SOC_GOOGLE),)
     endif
   endif
   ifneq ($(CONFIG_BCMDHD_PCIE),)
-    ifneq ($(filter y, $(CONFIG_SOC_GS201) $(CONFIG_SOC_ZUMA) $(CONFIG_SOC_LGA)),)
+    ifneq ($(filter y, $(CONFIG_SOC_GS201) $(CONFIG_SOC_ZUMA)),)
       DHDCFLAGS += -DPCIE_CPL_TIMEOUT_RECOVERY
     endif
   endif
