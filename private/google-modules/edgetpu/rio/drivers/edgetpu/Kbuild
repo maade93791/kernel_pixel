@@ -99,16 +99,3 @@ endif
 ifneq ($(wildcard $(CURRENT_DIR)/gcip-kernel-driver/drivers/gcip/iif/include),)
 ccflags-y += -I$(CURRENT_DIR)/gcip-kernel-driver/drivers/gcip/iif/include
 endif
-
-ifneq ($(wildcard $(GMODULE_SRC_PATH)/iif/include),)
-ccflags-y += -I$(GMODULE_SRC_PATH)/iif/include
-endif
-
-ifneq ($(wildcard $(GMODULE_SRC_PATH)/soc/rdo/include),)
-ccflags-y += -I$(GMODULE_SRC_PATH)/soc/rdo/include
-endif
-
-ifneq ($(wildcard $(GMODULE_SRC_PATH)/soc/rdo/mem-qos/include),)
-ccflags-y += -I$(GMODULE_SRC_PATH)/soc/rdo/mem-qos/include
-endif
-

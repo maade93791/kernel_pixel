@@ -23,14 +23,6 @@ ifneq ("$(wildcard $(COMMON_OUT_DIR)/private/google-modules/soc/gs/drivers/soc/g
 EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/soc/gs/drivers/soc/google/gsa/Module.symvers
 endif
 
-ifneq ("$(wildcard $(COMMON_OUT_DIR)/private/google-modules/iif/Module.symvers)","")
-EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/iif/Module.symvers
-endif
-
-ifneq ("$(wildcard $(COMMON_OUT_DIR)/private/google-modules/soc/rdo/Module.symvers)","")
-EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/soc/rdo/Module.symvers
-endif
-
 GCIP_DIR=gcip-kernel-driver/drivers/gcip
 
 modules modules_install compile_commands.json:
