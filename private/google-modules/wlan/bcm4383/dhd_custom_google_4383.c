@@ -90,12 +90,6 @@
 #define GOOGLE_PCIE_CH_NUM 0
 #endif /* CONFIG_PCI_EXYNOS_GS */
 
-#if IS_ENABLED(CONFIG_SOC_LGA)
-#define MSI_MASK_REG 0x3c80082c
-#define MSI_STAT_REG 0x3c800830
-#define PCI_ICDS_REG 0x3c009554
-#endif /* CONFIG_SOC_LGA */
-
 #if !IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
 uint32 support_l1ss;
 module_param(support_l1ss, uint, 0660);
@@ -189,9 +183,9 @@ extern void exynos_pcie_set_skip_config(int ch_num, bool val);
 #endif /* DHD_TREAT_D3ACKTO_AS_LINKDWN */
 #endif /* CONFIG_PCI_EXYNOS_GS */
 
-#if IS_ENABLED(CONFIG_SOC_LGA)
+#if IS_ENABLED(CONFIG_SOC_MBU)
 extern void google_pcie_dump_debug(int num);
-#endif /* CONFIG_SOC_LGA */
+#endif
 
 #ifdef DHD_COREDUMP
 #define DEVICE_NAME "wlan"
@@ -1811,41 +1805,6 @@ int dhd_plat_check_pcie_state(void)
 #endif /* CONFIG_PCI_EXYNOS_GS */
 }
 
-void dhd_plat_check_msi(void)
-{
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	u32 __iomem  *reg_ptr;
-	u32 val;
-
-	reg_ptr = ioremap(MSI_MASK_REG, SZ_4);
-	if (!reg_ptr) {
-		DHD_ERROR(("reg_ptr is NULL"));
-		return;
-	}
-	val = ioread32(reg_ptr);
-	DHD_PRINT(("MSI Mask=%#08x\n", val));
-	iounmap(reg_ptr);
-
-	reg_ptr = ioremap(MSI_STAT_REG, SZ_4);
-	if (!reg_ptr) {
-		DHD_ERROR(("reg_ptr is NULL"));
-		return;
-	}
-	val = ioread32(reg_ptr);
-	DHD_PRINT(("MSI Status=%#08x\n", val));
-	iounmap(reg_ptr);
-
-	reg_ptr = ioremap(PCI_ICDS_REG, SZ_4);
-	if (!reg_ptr) {
-		DHD_ERROR(("reg_ptr is NULL"));
-		return;
-	}
-	val = ioread32(reg_ptr);
-	DHD_PRINT(("ICD Status=%#08x\n", val));
-	iounmap(reg_ptr);
-#endif /* CONFIG_SOC_LGA */
-}
-
 #define RXBUF_ALLOC_PAGE_SIZE
 uint16 dhd_plat_align_rxbuf_size(uint16 rxbufpost_sz)
 {
@@ -1925,7 +1884,7 @@ dhd_plat_unregister_coredump(void)
 }
 #endif /* DHD_COREDUMP */
 
-#if IS_ENABLED(CONFIG_SOC_LGA) || IS_ENABLED(CONFIG_SOC_MBU)
+#if IS_ENABLED(CONFIG_SOC_MBU)
 static void
 dhd_plat_pcie_rc_dump(void *handle, void *event_info, u8 event)
 {
@@ -1944,7 +1903,7 @@ dhd_schedule_plat_pcie_rc_dump(dhd_pub_t *dhdp, void *type)
 
 void dhd_plat_pcie_dump_debug(void)
 {
-#if IS_ENABLED(CONFIG_SOC_LGA) || IS_ENABLED(CONFIG_SOC_MBU)
+#if IS_ENABLED(CONFIG_SOC_MBU)
 	dhd_pub_t *dhdp = (dhd_pub_t *)g_dhd_pub;
 
 	if (CAN_SLEEP()) {
@@ -2039,9 +1998,6 @@ dhd_pcie_l1ss_ctrl(int enable, int ch_num)
 
 	if (support_l1ss & enable) {
 		aspm_state = PCIE_LINK_STATE_L1 |
-#if IS_ENABLED(CONFIG_SOC_LGA)
-				PCIE_LINK_STATE_CLKPM |
-#endif /* CONFIG_SOC_LGA */
 				PCIE_LINK_STATE_L1_1 | PCIE_LINK_STATE_L1_2;
 	}
 
@@ -2058,11 +2014,6 @@ dhd_pcie_poweron(int ch_num)
 	u16 val;
 	static u8 speed;
 	struct pci_dev *pci_dev __free(pci_dev_put) = NULL;
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	u16 ltr = 0x1003;	/* 3145728 ns */
-	u32 ltr_reg;
-	int pos;
-#endif /* CONFIG_SOC_LGA */
 	/*
 	 * First poweron will happen at the controller's max-link-speed as
 	 * configured in device tree.  Once link is up, EP will be queried
@@ -2114,17 +2065,6 @@ dhd_pcie_poweron(int ch_num)
 			speed = fls(val) - 1;
 			DHD_INFO(("%s: Using GEN%d link speed\n", __FUNCTION__, speed));
 		}
-#if IS_ENABLED(CONFIG_SOC_LGA)
-		pos = pci_find_ext_capability(pci_dev, PCI_EXT_CAP_ID_LTR);
-		if (!pos)
-			return 0;
-
-		pci_read_config_dword(pci_dev, pos + PCI_LTR_MAX_SNOOP_LAT, &ltr_reg);
-
-		ltr_reg = (ltr << 16) | ltr;
-		pci_write_config_dword(pci_dev, pos + PCI_LTR_MAX_SNOOP_LAT, ltr_reg);
-		DHD_INFO(("%s: Default LTR value set to 3ms\n", __FUNCTION__));
-#endif /* CONFIG_SOC_LGA */
 		return 0;
 	}
 

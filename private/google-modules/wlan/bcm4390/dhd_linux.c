@@ -17031,10 +17031,6 @@ dhd_os_d3ack_wait(dhd_pub_t *pub, uint *condition)
 #endif /* BCMSLTGT */
 
 	timeout = wait_event_timeout(dhd->d3ack_wait, (*condition), timeout);
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	DHD_ERROR(("d3ack_wait %d\n", timeout));
-	dhd_plat_check_msi();
-#endif
 
 	return timeout;
 }

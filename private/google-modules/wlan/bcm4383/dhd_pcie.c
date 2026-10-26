@@ -142,10 +142,6 @@
 #define PCIE_FLR_CAPAB_BIT		28
 #define PCIE_FUNCTION_LEVEL_RESET_BIT	15
 
-#if IS_ENABLED(CONFIG_SOC_LGA)
-#define PCIEREG_L1_ENTRY_TIME_EXT 0x6904b0a0
-#endif /* CONFIG_SOC_LGA */
-
 #ifdef BCMQT_HW
 int cc_wd_reset = TRUE;
 int db7trap_in_detach = FALSE;
@@ -10994,9 +10990,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state, bool byint)
 	uint32 d2h_mb_data = 0;
 	uint32 zero = 0;
 #endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	uint32 base_addr0;
-#endif /* CONFIG_SOC_LGA */
 
 	if (bus->dhd == NULL) {
 		DHD_ERROR(("bus not inited\n"));
@@ -11034,11 +11027,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state, bool byint)
 		DHD_ERROR(("Bus is already in RESUME state.\n"));
 		return BCME_OK;
 	}
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	DHD_PRINT(("%s: .. ", __FUNCTION__));
-	base_addr0 = dhd_pcie_config_read(bus, 0x10, sizeof(uint32));
-	DHD_PRINT(("base_addr0=0x%x\n", base_addr0));
-#endif /* CONFIG_SOC_LGA */
 
 	if (state) {
 
@@ -11207,10 +11195,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state, bool byint)
 		if ((bus->wait_for_d3_ack == 0) && (timeleft == 0) &&
 			!dhd_query_bus_erros(bus->dhd)) {
 			DHD_PRINT(("%s: resumed on timeout for D3 ACK\n", __FUNCTION__));
-#if IS_ENABLED(CONFIG_SOC_LGA)
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
-#endif
 			dhd_plat_pcie_dump_debug();
 			if (dhd_recover_timeout_by_scheduling_dpc(bus)) {
 				timeleft = dhd_os_d3ack_wait(bus->dhd, &bus->wait_for_d3_ack);
@@ -11385,10 +11369,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state, bool byint)
 			DHD_PRINT(("%s: resumed on timeout for D3 ACK%s d3ackcnt_timeout %d\n",
 				__FUNCTION__, bus->dhd->is_sched_error ?
 				" due to scheduling problem" : "", bus->dhd->d3ackcnt_timeout));
-#if IS_ENABLED(CONFIG_SOC_LGA)
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
-#endif
 			dhd_plat_pcie_dump_debug();
 #if defined(DHD_KERNEL_SCHED_DEBUG) && defined(DHD_FW_COREDUMP)
 			/* DHD triggers Kernel panic if the resumed on timeout occurrs
@@ -16182,17 +16162,6 @@ static void dhdpcie_bus_post_init_quirks(dhd_bus_t *bus)
 }
 #endif /* __linux__ */
 
-#if IS_ENABLED(CONFIG_SOC_LGA)
-static void dhdpcie_bus_check_l1_entry_time(dhd_bus_t *bus)
-{
-	int32 val = dhdpcie_get_l1_entry_time(bus);
-	if (val != PCIEREG_L1_ENTRY_TIME_EXT) {
-		DHD_ERROR(("%s : Error with pcie_l1_entry 0x%x (expected 0x%x)\n",
-			__FUNCTION__, val, PCIEREG_L1_ENTRY_TIME_EXT));
-	}
-}
-#endif /* CONFIG_SOC_LGA */
-
 /**
  * Initialize bus module: prepare for communication with the dongle. Called after downloading
  * firmware into the dongle.
@@ -16346,10 +16315,6 @@ int dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 #if defined(__linux__)
 	dhdpcie_bus_post_init_quirks(bus);
 #endif /* __linux__ */
-
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	dhdpcie_bus_check_l1_entry_time(bus);
-#endif /* CONFIG_SOC_LGA */
 
 exit:
 	if (ret) {

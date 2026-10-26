@@ -250,13 +250,6 @@
 #define WL_DYNAMIC_CHAN_POLICY_DFS
 /* Keep P2P DFS Skip logic disabled for using dynamic DFS policy */
 /* #define P2P_SKIP_DFS */
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	#if IS_ENABLED(CONFIG_BCM4383)
-		/* allow SCC for AP/GO in 165/20 */
-		#define WL_UNII4_CHAN_SCC
-	#endif
-#endif
-
 #if IS_ENABLED(CONFIG_ARCH_MESON)
 	#define BOARD_MODULAR_INIT
 #endif
@@ -360,16 +353,6 @@
 		#define DHD_LB_CANDIDACY_OVERRIDE
 		#define DHD_TCP_LIMIT_OUTPUT
 		#define DHD_TCP_PACING_SHIFT
-	#elif IS_ENABLED(CONFIG_SOC_LGA)
-		#if IS_ENABLED(CONFIG_BCM4390)
-			#define DHD_LB_CPU_SET8 0x100
-			#define DHD_LB_CPU_SET4 0x0F0
-			#define DHD_LB_CPU_SET0 0x00E
-		#elif IS_ENABLED(CONFIG_BCM4383)
-			#define DHD_LB_CPU_SET8 0x100
-			#define DHD_LB_CPU_SET4 0x07C
-			#define DHD_LB_CPU_SET0 0x002
-		#endif
 	#elif IS_ENABLED(CONFIG_SOC_ZUMAPRO)
 		#if IS_ENABLED(CONFIG_BCM4390)
 			#define DHD_LB_CPU_SET8 0x100
@@ -427,23 +410,6 @@
 				#define DHD_MID_CORE_PERF_FREQ 2649000u
 				#define DHD_BIG_CORE_PERF_FREQ 3340000u
 			#endif
-		#elif IS_ENABLED(CONFIG_SOC_LGA)
-			#if IS_ENABLED(CONFIG_BCM4390)
-				#define PKT_COUNT_HIGH 60000
-				#define PKT_COUNT_MID 5000
-				#define PKT_COUNT_LOW 3000
-			#elif IS_ENABLED(CONFIG_BCM4383)
-				#define DHD_CUSTOM_PKT_COUNT_ENABLE
-				#define PKT_COUNT_HIGH 50000
-				#define PKT_COUNT_MID 5000
-				#define PKT_COUNT_LOW 3000
-				#define DHD_CPUFREQ_MID 2u
-				#define DHD_CPUFREQ_MID2 5u
-				#define DHD_CPUFREQ_BIG 7u
-				#define DHD_LITTLE_CORE_PERF_FREQ 1881600u
-				#define DHD_MID_CORE_PERF_FREQ 2515200u
-				#define DHD_BIG_CORE_PERF_FREQ 3052800u
-			#endif
 		#elif IS_ENABLED(CONFIG_SOC_ZUMAPRO)
 			#if IS_ENABLED(CONFIG_BCM4390)
 				#define PKT_COUNT_HIGH 60000
@@ -487,7 +453,7 @@
 		#endif
 		#define CLEAN_IRQ_AFFINITY_HINT
 		#define WAKEUP_KSOFTIRQD_POST_NAPI_SCHEDULE
-		#if IS_ENABLED(CONFIG_SOC_ZUMAPRO) || IS_ENABLED(CONFIG_SOC_LGA)
+		#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
 			#define IRQ_AFFINITY_SMALL_CORE 6
 			#define IRQ_AFFINITY_BIG_CORE 7
 		#elif IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
@@ -529,12 +495,6 @@
 			/* PCIE CPL TIMEOUT WAR */
 			/* #define DHD_TREAT_D3ACKTO_AS_LINKDWN */
 		#endif
-		#if IS_ENABLED(CONFIG_SOC_LGA)
-			#if defined(BCMDHD) && (BCMDHD == 4383)
-				#define DHD_TREAT_D2H_CTO_AS_LINKDOWN
-				#define DHD_DEFER_L1SS_ENABLE_IN_RESUME
-			#endif
-		#endif
 		/* Skip xorcsum for high throughput case */
 		#define DHD_SKIP_XORCSUM_HIGH_TPUT
 		/* Schedule NAPI directly on same cpu for Low TPUT */
@@ -546,7 +506,7 @@
 		#define DHD_SKIP_COREDUMP_OLDER_CHIPS
 		/* Skip coredump for continousy pkt drop health check */
 		#define SKIP_COREDUMP_PKTDROP_RXHC
-		#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS) || IS_ENABLED(CONFIG_SOC_LGA)
+		#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
 			/* Boost host cpufreq to max for peak tput. default is false */
 			#define DHD_HOST_CPUFREQ_BOOST
 			/* Boost host cpufreq to max for peak tput. default is true */
@@ -576,10 +536,6 @@
 	#define WL_MLO_BKPORT_NEW_PORT_AUTH
 	/* CROSS AKM related back port changes */
 	#define WL_CROSS_AKM_BKPORT
-	#if IS_ENABLED(CONFIG_SOC_LGA)
-		/* Avoid SSR dump on state mismatch */
-		#define DHD_AVOID_SSR_ON_STATE_MISMATCH
-	#endif
 	/* Disable NAN pairing for rel builds till associated sec is supported */
 	#define DISABLE_NAN_PAIRING
 	/* ch_switch_notify back port changes */
@@ -737,9 +693,6 @@
 #define ROAMEXP_SUPPORT
 #define CUSTOM_BSSID_BLACKLIST_NUM 16
 #define CUSTOM_SSID_WHITELIST_NUM 16
-#if IS_ENABLED(CONFIG_SOC_LGA)
-	#define DHD_FORCE_WLREGON_CTRL
-#endif
 /* Kind of WAR */
 #define ENABLE_TDLS_AUTO_MODE
 #define EXPLICIT_DISCIF_CLEANUP
@@ -1178,7 +1131,7 @@
 		#endif
 	#endif
 	#if IS_ENABLED(CONFIG_BCMDHD_PCIE)
-		#if IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA) || IS_ENABLED(CONFIG_SOC_LGA)
+		#if IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA)
 			#define PCIE_CPL_TIMEOUT_RECOVERY
 		#endif
 	#endif
