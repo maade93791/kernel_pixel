@@ -21,7 +21,6 @@ load(
     "kernel_images",
     "kernel_module_group",
     "kernel_modules_install",
-    "kernel_modules_sign",
     "kernel_unstripped_modules_archive",
     "merged_kernel_uapi_headers",
 )
@@ -149,8 +148,6 @@ def device_build(
     target_dtbos = "{}/dtbos".format(name)
     target_ext_modules = "{}/ext_modules".format(name)
     target_kernel_modules_install = "{}/kernel_modules_install".format(name)
-    target_unsigned_modules_install = "{}/unsigned_modules_install".format(name)
-    target_kernel_non_module_outs = "{}/kernel_non_module_outs".format(name)
     target_kernel_unstripped_modules_archive = "{}/kernel_unstripped_modules_archive".format(name)
     target_merged_kernel_uapi_headers = "{}/merged_kernel_uapi_headers".format(name)
     target_ddk_uapi_headers = "{}/ddk_uapi_headers".format(name)
@@ -253,30 +250,6 @@ def device_build(
         visibility = ["//visibility:private"],
     )
 
-    # Keep raw vendor modules out of dist; signed install owns their flat copies.
-    native.filegroup(
-        name = target_kernel_non_module_outs,
-        srcs = [target_kernel],
-        output_group = "non_module_outs",
-        visibility = ["//visibility:private"],
-    )
-
-    signing_material = {}
-    for part, output_group in [
-        ("key", "certs/signing_key.pem"),
-        ("certificate", "certs/signing_key.x509"),
-        ("config", ".config"),
-        ("sign_file", "scripts/sign-file"),
-    ]:
-        label = "{}/module_signing/{}".format(name, part)
-        native.filegroup(
-            name = label,
-            srcs = ["//common:kernel_aarch64"],
-            output_group = output_group,
-            visibility = ["//visibility:private"],
-        )
-        signing_material[part] = label
-
     native.filegroup(
         name = target_dtbs,
         srcs = ["{}/{}".format(target_kernel, dtb) for dtb in dtb_outs],
@@ -293,20 +266,9 @@ def device_build(
     )
 
     kernel_modules_install(
-        name = target_unsigned_modules_install,
+        name = target_kernel_modules_install,
         kernel_build = target_kernel,
         kernel_modules = [target_ext_modules],
-        visibility = ["//visibility:private"],
-    )
-
-    kernel_modules_sign(
-        name = target_kernel_modules_install,
-        modules = target_unsigned_modules_install,
-        kernel_build = target_kernel,
-        signing_key = signing_material["key"],
-        certificate = signing_material["certificate"],
-        signing_config = signing_material["config"],
-        sign_file = signing_material["sign_file"],
         visibility = ["//visibility:private"],
     )
 
@@ -457,7 +419,6 @@ def device_build(
             visibility = ["//visibility:private"],
         )
 
-    # Native image rules default strip_modules to False, preserving signed bytes.
     kernel_images(
         name = target_kernel_images,
         kernel_modules_install = target_kernel_modules_install,
@@ -505,7 +466,7 @@ def device_build(
         target_dtbs,
         target_dtbos,
         target_insmod_cfgs,
-        target_kernel_non_module_outs,
+        target_kernel,
         target_kernel_images,
         target_kernel_modules_install,
         target_kernel_unstripped_modules_archive,
