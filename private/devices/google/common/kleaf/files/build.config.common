@@ -1,7 +1,6 @@
-. ${ROOT_DIR}/${KERNEL_DIR}/build.config.common
-. ${ROOT_DIR}/${KERNEL_DIR}/build.config.aarch64
+# SPDX-License-Identifier: GPL-2.0-only
 
-DEFCONFIG=gki_defconfig
+. ${ROOT_DIR}/${KERNEL_DIR}/build.config.constants
 
 BOOT_IMAGE_HEADER_VERSION=4
 TRIM_UNUSED_MODULES=1

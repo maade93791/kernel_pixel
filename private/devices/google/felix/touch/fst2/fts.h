@@ -159,4 +159,9 @@ extern int fts_proc_remove(void);
 int fts_system_reset(struct fts_ts_info *info, int poll_event);
 int fts_set_interrupt(struct fts_ts_info *info, bool enable);
 
+void set_system_reseted_up(int val);
+void set_system_reseted_down(int val);
+int is_system_resetted_up(void);
+int is_system_resetted_down(void);
+
 #endif

@@ -7,9 +7,11 @@ Define build targets for a device.
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:select_file.bzl", "select_file")
 load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
+load("//build/kernel/kleaf:constants.bzl", "COMMON_KCFLAGS")
 load(
     "//build/kernel/kleaf:kernel.bzl",
     "dtb_image",
+    "dtbo_image",
     "kernel_abi",
     "kernel_build",
     "kernel_build_config",
@@ -21,7 +23,7 @@ load(
     "kernel_unstripped_modules_archive",
     "merged_kernel_uapi_headers",
 )
-load("//private/devices/google/common:constants.bzl", "PIXEL_GKI_MODULES_LIST")
+load("//private/devices/google/common:constants.bzl", "get_pixel_gki_modules_list")
 load("//private/devices/google/common/kleaf:create_file.bzl", "create_file")
 load("//private/devices/google/common/kleaf:image_props.bzl", "image_props")
 load("//private/devices/google/common/kleaf:merged_uapi_headers.bzl", "merged_uapi_headers")
@@ -64,6 +66,7 @@ def device_build(
         {name}/ext_modules
         {name}/ddk_uapi_headers
         {name}/kernel_images
+        {name}/kernel_images_dtbo
         {name}/dtb_image
         {name}/dist
         {name}/kernel_abi
@@ -119,8 +122,6 @@ def device_build(
         base_insmod_cfgs = ["{}/insmod_cfgs".format(base_device)]
     else:
         base_build_configs = [
-            # do not sort
-            "//common:set_kernel_dir_build_config",
             "//private/devices/google/common/kleaf/files:build.config.common",
         ]
         base_kconfigs = []
@@ -164,6 +165,7 @@ def device_build(
     target_merged_dlkm_modules_blocklist = "{}/merged_dlkm_modules_blocklist".format(name)
     target_insmod_cfgs = "{}/insmod_cfgs".format(name)
     target_kernel_images = "{}/kernel_images".format(name)
+    target_dtbo_image = target_kernel_images + "_dtbo"
     target_boot_image_selection = "{}/boot_image_selection".format(name)
     target_boot_image = "{}/boot_image".format(name)
     target_dtb_image = "{}/dtb_image".format(name)
@@ -221,7 +223,7 @@ def device_build(
     select_file(
         name = target_kmi_symbol_list,
         srcs = "//common:aarch64_additional_kmi_symbol_lists",
-        subpath = "android/abi_gki_aarch64_pixel",
+        subpath = "gki/aarch64/symbols/pixel",
     )
 
     kernel_build(
@@ -232,10 +234,13 @@ def device_build(
         implicit_outs = dtbo_outs,
         base_kernel = "//common:kernel_aarch64",
         build_config = target_build_config,
+        defconfig = "//common:arch/arm64/configs/gki_defconfig",
         dtstree = target_dtstree if need_dtstree else None,
         collect_unstripped_modules = True,
-        defconfig_fragments = [target_defconfig_fragments],
+        post_defconfig_fragments = [target_defconfig_fragments],
         kconfig_ext = target_kconfig_ext,
+        kcflags = COMMON_KCFLAGS,
+        makefile = "//common:Makefile",
         make_goals = ["modules", "dtbs"],
         kmi_symbol_list = target_kmi_symbol_list,
         module_outs = module_outs,
@@ -318,7 +323,7 @@ def device_build(
         name = target_system_dlkm_modules_list,
         out = "{}/system_dlkm.modules".format(name),
         # The list is used to filter modules with `grep -w`.
-        contents = ["^kernel/" + m for m in PIXEL_GKI_MODULES_LIST],
+        contents = get_pixel_gki_modules_list(map_each = lambda module: "^kernel/" + module),
         visibility = ["//visibility:private"],
     )
 
@@ -399,6 +404,19 @@ def device_build(
         srcs = base_insmod_cfgs + insmod_cfgs,
     )
 
+    if build_dtbo:
+        dtbo_image(
+            name = target_dtbo_image,
+            srcs = [target_dtbos],
+            # Preserve MKDTIMG_FLAGS from files/build.config.common.
+            opts = [
+                "--page_size=4096",
+                "--id=/:board_id",
+                "--rev=/:board_rev",
+            ],
+            visibility = ["//visibility:private"],
+        )
+
     kernel_images(
         name = target_kernel_images,
         kernel_modules_install = target_kernel_modules_install,
@@ -408,7 +426,7 @@ def device_build(
         build_vendor_kernel_boot = build_vendor_kernel_boot,
         build_system_dlkm = build_system_dlkm,
         build_vendor_dlkm = build_vendor_dlkm,
-        build_dtbo = build_dtbo,
+        build_dtbo = False,
         boot_image_outs = ["vendor_kernel_boot.img"] if build_vendor_kernel_boot else [],
         ramdisk_compression = "lz4",
         modules_list = target_vendor_ramdisk_modules_list,
@@ -420,7 +438,6 @@ def device_build(
         vendor_dlkm_modules_list = target_vendor_dlkm_modules_list if build_system_dlkm else target_merged_dlkm_modules_list,
         vendor_dlkm_modules_blocklist = target_vendor_dlkm_modules_blocklist if build_system_dlkm else target_merged_dlkm_modules_blocklist,
         vendor_dlkm_props = target_vendor_dlkm_props,
-        dtbo_srcs = [target_dtbos] if build_dtbo else None,
         deps = [
             target_system_dlkm_file_contexts,
             target_vendor_dlkm_file_contexts,
@@ -472,6 +489,9 @@ def device_build(
             target_vendor_dlkm_props,
         ]
 
+    if build_dtbo:
+        dist_targets.append(target_dtbo_image)
+
     if build_dtb:
         dtb_image(
             name = target_dtb_image,
@@ -480,13 +500,6 @@ def device_build(
             visibility = ["//visibility:private"],
         )
         dist_targets.append(target_dtb_image)
-
-    dist_targets += select({
-        "//private/devices/google/common:use_prebuilt_fips140_is_true": [
-            "//private/devices/google/common:fips140",
-        ],
-        "//conditions:default": [],
-    })
 
     native.filegroup(
         name = target_dist_files,

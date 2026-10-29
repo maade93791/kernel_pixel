@@ -432,8 +432,8 @@ int get_fw_file_data(const char *path_to_file, u8 **data, int *size)
   *processed data
   * @return OK if success or an error code which specify the type of error
   */
-int parse_bin_file(u8 *ubin_data, int ubin_size,
-		struct firmware_file *fw_data)
+static int parse_bin_file(u8 *ubin_data, int ubin_size,
+			  struct firmware_file *fw_data)
 {
 	int index = 0;
 	u32 temp = 0;

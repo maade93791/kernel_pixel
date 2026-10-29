@@ -27,6 +27,8 @@ kernel_module(
         "drivers/clocksource/exynos_mct.ko",
         "drivers/cpufreq/exynos-acme.ko",
         "drivers/devfreq-whi/google/exynos_devfreq.ko",
+        "drivers/dma-buf/heaps/deferred-free-helper.ko",
+        "drivers/dma-buf/heaps/page_pool.ko",
         "drivers/dma-buf/heaps/samsung/samsung_dma_heap.ko",
         "drivers/dma/pl330.ko",
         "drivers/dma/samsung-dma.ko",

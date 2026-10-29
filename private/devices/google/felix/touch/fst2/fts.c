@@ -41,6 +41,7 @@
 #include <linux/i2c-dev.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
@@ -1085,7 +1086,7 @@ static int gti_default_handler(void *private_data, enum gti_cmd_type cmd_type,
   * @param type type of MS frame to read
   * @return zero if success or an error code which specify the type of error
   */
-int goog_get_ms_frame(struct fts_ts_info *info, ms_frame_type_t type)
+static int goog_get_ms_frame(struct fts_ts_info *info, ms_frame_type_t type)
 {
 	u16 offset;
 	int res = 0;
@@ -1137,7 +1138,7 @@ int goog_get_ms_frame(struct fts_ts_info *info, ms_frame_type_t type)
   * @param type type of SS frame to read
   * @return zero if success or an error code which specify the type of error
   */
-int goog_get_ss_frame(struct fts_ts_info *info, ss_frame_type_t type)
+static int goog_get_ss_frame(struct fts_ts_info *info, ss_frame_type_t type)
 {
 	u16 self_force_offset = 0;
 	u16 self_sense_offset = 0;
@@ -1637,24 +1638,17 @@ static int fts_gpio_setup(struct fts_ts_info *info, int gpio, bool config, int d
 {
 	int ret_val = 0;
 	unsigned char buf[16];
+	unsigned long flags;
 
 	if (config) {
 		scnprintf(buf, 16, "fts_gpio_%u\n", gpio);
 
-		ret_val = devm_gpio_request(info->dev, gpio, buf);
+		flags = !dir ? GPIOF_IN :
+			(state ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW);
+		ret_val = devm_gpio_request_one(info->dev, gpio, flags, buf);
 		if (ret_val) {
 			pr_err("%s: Failed to get gpio %d (code: %d)",
 				__func__, gpio, ret_val);
-			return ret_val;
-		}
-
-		if (dir == 0)
-			ret_val = gpio_direction_input(gpio);
-		else
-			ret_val = gpio_direction_output(gpio, state);
-		if (ret_val) {
-			pr_err("%s: Failed to set gpio %d direction",
-				__func__, gpio);
 			return ret_val;
 		}
 	}
@@ -1834,13 +1828,12 @@ static int parse_dt(struct device *dev, struct fts_hw_platform_data *bdata)
 		}
 	}
 
-	bdata->irq_gpio = of_get_named_gpio_flags(np, "st,irq-gpio", 0, NULL);
+	bdata->irq_gpio = of_get_named_gpio(np, "st,irq-gpio", 0);
 
 	pr_info("%s: irq_gpio = %d\n", __func__, bdata->irq_gpio);
 
 	if (of_property_read_bool(np, "st,reset-gpio")) {
-		bdata->reset_gpio = of_get_named_gpio_flags(np,
-				"st,reset-gpio", 0, NULL);
+		bdata->reset_gpio = of_get_named_gpio(np, "st,reset-gpio", 0);
 		pr_info("%s: reset_gpio = %d\n", __func__, bdata->reset_gpio);
 	} else
 		bdata->reset_gpio = GPIO_NOT_DEFINED;

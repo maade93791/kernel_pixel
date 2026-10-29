@@ -4,10 +4,7 @@ load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
 
 kernel_module(
     name = "drm_panel.google",
-    srcs = glob([
-        "**/*.c",
-        "**/*.h",
-    ]) + [
+    srcs = glob(["**/*.c"]) + glob(["**/*.h"], allow_empty = True) + [
         "Kbuild",
         "//private/google-modules/display/common:headers",
         "//private/google-modules/display/samsung:headers",
