@@ -665,10 +665,6 @@ static int update_vendor_tunables(const char *buf, int count, int type)
 					goto fail;
 				updated_tunables = sched_per_cpu_iowait_boost_max_value;
 				break;
-			case TEO_UTIL_THRESHOLD:
-				if (val > SCHED_CAPACITY_SCALE)
-					goto fail;
-				break;
 			default:
 				goto fail;
 		}
@@ -680,25 +676,13 @@ static int update_vendor_tunables(const char *buf, int count, int type)
 	}
 
 	if (index == 1) {
-		for (index = 0; index < pixel_cpu_num; index++) {
-			if (type != TEO_UTIL_THRESHOLD)
-				updated_tunables[index] = tmp[0];
-			else
-				teo_cpu_set_util_threshold(index, tmp[pixel_cpu_to_cluster[index]]);
-		}
+		for (index = 0; index < pixel_cpu_num; index++)
+			updated_tunables[index] = tmp[0];
 	} else if (index == pixel_cluster_num) {
-		for (index = 0; index < pixel_cpu_num; index++) {
-			if (type != TEO_UTIL_THRESHOLD)
-				updated_tunables[index] = tmp[pixel_cpu_to_cluster[index]];
-			else
-				teo_cpu_set_util_threshold(index, tmp[pixel_cpu_to_cluster[index]]);
-		}
+		for (index = 0; index < pixel_cpu_num; index++)
+			updated_tunables[index] = tmp[pixel_cpu_to_cluster[index]];
 	} else if (index == pixel_cpu_num) {
-		if (type != TEO_UTIL_THRESHOLD)
-			memcpy(updated_tunables, tmp, sizeof(tmp));
-		else
-			for (index = 0; index < pixel_cpu_num; index++)
-				teo_cpu_set_util_threshold(index, tmp[index]);
+		memcpy(updated_tunables, tmp, sizeof(tmp));
 	} else {
 		goto fail;
 	}
@@ -1761,33 +1745,17 @@ static ssize_t dvfs_headroom_store(struct file *filp,
 }
 PROC_OPS_RW(dvfs_headroom);
 
+/* Native 6.18 TEO no longer uses the former utilization-threshold policy. */
 static int teo_util_threshold_show(struct seq_file *m, void *v)
 {
-	int i;
-
-	for (i = 0; i < pixel_cpu_num; i++) {
-		seq_printf(m, "%lu ", teo_cpu_get_util_threshold(i));
-	}
-
-	seq_printf(m, "\n");
-
-	return 0;
+	return -EOPNOTSUPP;
 }
+
 static ssize_t teo_util_threshold_store(struct file *filp,
 					const char __user *ubuf,
 					size_t count, loff_t *pos)
 {
-	char buf[MAX_PROC_SIZE];
-
-	if (count >= sizeof(buf))
-		return -EINVAL;
-
-	if (copy_from_user(buf, ubuf, count))
-		return -EFAULT;
-
-	buf[count] = '\0';
-
-	return update_vendor_tunables(buf, count, TEO_UTIL_THRESHOLD);
+	return -EOPNOTSUPP;
 }
 PROC_OPS_RW(teo_util_threshold);
 
@@ -2582,7 +2550,7 @@ PROC_OPS_RW(max_load_balance_interval);
 
 static int min_granularity_ns_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%d\n", sysctl_sched_min_granularity);
+	seq_printf(m, "%d\n", sysctl_sched_base_slice);
 	return 0;
 }
 static ssize_t min_granularity_ns_store(struct file *filp,
@@ -2604,41 +2572,21 @@ static ssize_t min_granularity_ns_store(struct file *filp,
 		return -EINVAL;
 
 	vh_sched_min_granularity_ns = val;
-	vh_sched_wakeup_granularity_ns = val;
-	sysctl_sched_min_granularity = val;
-	sysctl_sched_wakeup_granularity = val;
+	sysctl_sched_base_slice = val;
 
 	return count;
 }
 PROC_OPS_RW(min_granularity_ns);
 
+/* CFS target latency has no equivalent control in EEVDF. */
 static int latency_ns_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%d\n", sysctl_sched_latency);
-	return 0;
+	return -EOPNOTSUPP;
 }
-static ssize_t latency_ns_store(struct file *filp,
-				const char __user *ubuf,
+static ssize_t latency_ns_store(struct file *filp, const char __user *ubuf,
 				size_t count, loff_t *pos)
 {
-	unsigned int val;
-	char buf[MAX_PROC_SIZE];
-
-	if (count >= sizeof(buf))
-		return -EINVAL;
-
-	if (copy_from_user(buf, ubuf, count))
-		return -EFAULT;
-
-	buf[count] = '\0';
-
-	if (kstrtouint(buf, 0, &val))
-		return -EINVAL;
-
-	vh_sched_latency_ns = val;
-	sysctl_sched_latency = val;
-
-	return count;
+	return -EOPNOTSUPP;
 }
 PROC_OPS_RW(latency_ns);
 
@@ -3256,7 +3204,7 @@ static ssize_t cpu_skip_mask_store(struct file *filp,
 }
 PROC_OPS_RW(cpu_skip_mask);
 
-int priority_task_name_show(struct seq_file *m, void *v)
+static int priority_task_name_show(struct seq_file *m, void *v)
 {
 	unsigned long irqflags;
 
@@ -3269,7 +3217,7 @@ int priority_task_name_show(struct seq_file *m, void *v)
 /*
  * Accept multiple partial task names with comma separated
  */
-ssize_t priority_task_name_store(struct file *filp, const char __user *ubuf, size_t count,
+static ssize_t priority_task_name_store(struct file *filp, const char __user *ubuf, size_t count,
 				 loff_t *ppos)
 {
 	char tmp[sizeof(priority_task_name)];
@@ -3283,7 +3231,7 @@ ssize_t priority_task_name_store(struct file *filp, const char __user *ubuf, siz
 	tmp[count] = '\0';
 
 	spin_lock_irqsave(&priority_task_name_lock, irqflags);
-	strlcpy(priority_task_name, tmp, sizeof(priority_task_name));
+	strscpy(priority_task_name, tmp, sizeof(priority_task_name));
 	spin_unlock_irqrestore(&priority_task_name_lock, irqflags);
 	return count;
 }
@@ -3320,7 +3268,7 @@ static ssize_t priority_task_boost_value_store(struct file *filp, const char __u
 }
 PROC_OPS_RW(priority_task_boost_value);
 
-int prefer_idle_task_name_show(struct seq_file *m, void *v)
+static int prefer_idle_task_name_show(struct seq_file *m, void *v)
 {
 
 	spin_lock(&prefer_idle_task_name_lock);
@@ -3332,7 +3280,7 @@ int prefer_idle_task_name_show(struct seq_file *m, void *v)
 /*
  * Accept multiple partial task names with comma separated
  */
-ssize_t prefer_idle_task_name_store(struct file *filp, const char __user *ubuf, size_t count,
+static ssize_t prefer_idle_task_name_store(struct file *filp, const char __user *ubuf, size_t count,
 				 loff_t *ppos)
 {
 	char tmp[sizeof(prefer_idle_task_name)];
@@ -3345,7 +3293,7 @@ ssize_t prefer_idle_task_name_store(struct file *filp, const char __user *ubuf, 
 	tmp[count] = '\0';
 
 	spin_lock(&prefer_idle_task_name_lock);
-	strlcpy(prefer_idle_task_name, tmp, sizeof(prefer_idle_task_name));
+	strscpy(prefer_idle_task_name, tmp, sizeof(prefer_idle_task_name));
 	spin_unlock(&prefer_idle_task_name_lock);
 
 	if (set_prefer_idle_task_name())
@@ -3400,7 +3348,7 @@ static ssize_t check_tgid_type_store(struct file *filp,
 		return -EACCES;
 	}
 
-	strlcpy(tgid_comm, p->comm, TASK_COMM_LEN);
+	strscpy(tgid_comm, p->comm, TASK_COMM_LEN);
 	put_task_struct(p);
 	rcu_read_unlock();
 
@@ -3414,7 +3362,7 @@ static ssize_t check_tgid_type_store(struct file *filp,
 }
 PROC_OPS_WO(check_tgid_type);
 
-int boost_at_fork_task_name_show(struct seq_file *m, void *v)
+static int boost_at_fork_task_name_show(struct seq_file *m, void *v)
 {
 	unsigned long irqflags;
 
@@ -3427,7 +3375,7 @@ int boost_at_fork_task_name_show(struct seq_file *m, void *v)
 /*
  * Accepts a single value only.
  */
-ssize_t boost_at_fork_task_name_store(struct file *filp, const char __user *ubuf, size_t count,
+static ssize_t boost_at_fork_task_name_store(struct file *filp, const char __user *ubuf, size_t count,
 				 loff_t *ppos)
 {
 	char tmp[sizeof(boost_at_fork_task_name)];
@@ -3441,7 +3389,7 @@ ssize_t boost_at_fork_task_name_store(struct file *filp, const char __user *ubuf
 	tmp[count] = '\0';
 
 	raw_spin_lock_irqsave(&boost_at_fork_task_name_lock, irqflags);
-	strlcpy(boost_at_fork_task_name, tmp, sizeof(boost_at_fork_task_name));
+	strscpy(boost_at_fork_task_name, tmp, sizeof(boost_at_fork_task_name));
 	raw_spin_unlock_irqrestore(&boost_at_fork_task_name_lock, irqflags);
 	return count;
 }
@@ -3709,15 +3657,74 @@ static struct pentry entries[] = {
 };
 
 
+void release_sched_controls(void)
+{
+	if (iidev_b)
+		idle_inject_unregister(iidev_b);
+	if (iidev_m)
+		idle_inject_unregister(iidev_m);
+	if (iidev_l)
+		idle_inject_unregister(iidev_l);
+	iidev_l = NULL;
+	iidev_m = NULL;
+	iidev_b = NULL;
+}
+
+int prepare_sched_controls(void)
+{
+	struct uclamp_se uc_max = {};
+	enum uclamp_id clamp_id;
+	cpumask_t cpumask;
+	int i;
+
+	uc_max.value = uclamp_none(UCLAMP_MAX);
+	uc_max.bucket_id = get_bucket_id(uc_max.value);
+	uc_max.user_defined = false;
+	for (clamp_id = 0; clamp_id < UCLAMP_CNT; clamp_id++)
+		uclamp_default[clamp_id] = uc_max;
+
+	initialize_vendor_group_property();
+
+	/* Register idle injection */
+	cpumask_clear(&cpumask);
+	for (i = pixel_cluster_start_cpu[0]; i < pixel_cluster_start_cpu[1]; i++)
+		cpumask_set_cpu(i, &cpumask);
+	iidev_l = idle_inject_register(&cpumask);
+	if (!iidev_l)
+		goto fail;
+	idle_inject_set_duration(iidev_l, 2000, 14000);
+	idle_inject_set_latency(iidev_l, 5000);
+
+	cpumask_clear(&cpumask);
+	for (i = pixel_cluster_start_cpu[1]; i < pixel_cluster_start_cpu[2]; i++)
+		cpumask_set_cpu(i, &cpumask);
+	iidev_m = idle_inject_register(&cpumask);
+	if (!iidev_m)
+		goto fail;
+	idle_inject_set_duration(iidev_m, 2000, 14000);
+	idle_inject_set_latency(iidev_m, 5000);
+
+	cpumask_clear(&cpumask);
+	for (i = pixel_cluster_start_cpu[2]; i < pixel_cpu_num; i++)
+		cpumask_set_cpu(i, &cpumask);
+	iidev_b = idle_inject_register(&cpumask);
+	if (!iidev_b)
+		goto fail;
+	idle_inject_set_duration(iidev_b, 2000, 14000);
+	idle_inject_set_latency(iidev_b, 5000);
+
+	return 0;
+fail:
+	release_sched_controls();
+	return -ENOMEM;
+}
+
 int create_procfs_node(void)
 {
 	int i;
-	struct uclamp_se uc_max = {};
-	enum uclamp_id clamp_id;
 	struct proc_dir_entry *parent_directory;
 	struct proc_dir_entry *group_root_dir;
 	struct proc_dir_entry *sched_qos_dir;
-	cpumask_t cpumask;
 
 	/* create vendor sched root directory */
 	vendor_sched = proc_mkdir("vendor_sched", NULL);
@@ -3774,43 +3781,6 @@ int create_procfs_node(void)
 		}
 	}
 
-	uc_max.value = uclamp_none(UCLAMP_MAX);
-	uc_max.bucket_id = get_bucket_id(uc_max.value);
-	uc_max.user_defined = false;
-	for (clamp_id = 0; clamp_id < UCLAMP_CNT; clamp_id++) {
-		uclamp_default[clamp_id] = uc_max;
-	}
-
-	initialize_vendor_group_property();
-
-	/* Register idle injection */
-	cpumask_clear(&cpumask);
-	for (i = pixel_cluster_start_cpu[0]; i < pixel_cluster_start_cpu[1]; i++)
-		cpumask_set_cpu(i, &cpumask);
-	iidev_l = idle_inject_register(&cpumask);
-	if (!iidev_l)
-		goto out;
-	idle_inject_set_duration(iidev_l, 2000, 14000);
-	idle_inject_set_latency(iidev_l, 5000);
-
-	cpumask_clear(&cpumask);
-	for (i = pixel_cluster_start_cpu[1]; i < pixel_cluster_start_cpu[2]; i++)
-		cpumask_set_cpu(i, &cpumask);
-	iidev_m = idle_inject_register(&cpumask);
-	if (!iidev_m)
-		goto out;
-	idle_inject_set_duration(iidev_m, 2000, 14000);
-	idle_inject_set_latency(iidev_m, 5000);
-
-	cpumask_clear(&cpumask);
-	for (i = pixel_cluster_start_cpu[2]; i < pixel_cpu_num; i++)
-		cpumask_set_cpu(i, &cpumask);
-	iidev_b = idle_inject_register(&cpumask);
-	if (!iidev_b)
-		goto out;
-	idle_inject_set_duration(iidev_b, 2000, 14000);
-	idle_inject_set_latency(iidev_b, 5000);
-
 	return 0;
 
 out:
@@ -3818,4 +3788,4 @@ out:
 	return -ENOMEM;
 }
 
-MODULE_IMPORT_NS(IDLE_INJECT);
+MODULE_IMPORT_NS("IDLE_INJECT");

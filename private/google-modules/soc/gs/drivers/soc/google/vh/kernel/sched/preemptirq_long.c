@@ -98,6 +98,8 @@ void note_context_switch(void *u1, bool u2, struct task_struct *u3,
 		this_cpu_write(preempt_disabled_ts, 0);
 }
 
+static struct ctl_table_header *preemptirq_sysctl_header;
+
 static struct ctl_table preemptirq_long_table[] = {
 	{
 		.procname       = "preemptoff_tracing_threshold_ns",
@@ -138,15 +140,22 @@ static struct ctl_table preemptirq_long_table[] = {
 		.extra1		= &one_million,
 		.extra2		= &one_hundred_million,
 	},
-	{ }
 };
 
 int preemptirq_long_init(void)
 {
-	if (!register_sysctl("preemptirq", preemptirq_long_table)) {
+	preemptirq_sysctl_header = register_sysctl("preemptirq", preemptirq_long_table);
+	if (!preemptirq_sysctl_header) {
 		pr_err("Fail to register sysctl table\n");
 		return -EPERM;
 	}
 
 	return 0;
+}
+
+/* Only before a restricted hook succeeds; native unregister drains sysctl users. */
+void preemptirq_long_unregister(void)
+{
+	unregister_sysctl_table(preemptirq_sysctl_header);
+	preemptirq_sysctl_header = NULL;
 }

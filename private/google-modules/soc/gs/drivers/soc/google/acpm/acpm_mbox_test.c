@@ -30,7 +30,7 @@
 #include "../../../soc/google/cal-if/acpm_dvfs.h"
 #if defined(CONFIG_SOC_GS101)
 #include <dt-bindings/clock/gs101.h>
-#include <linux/mfd/samsung/s2mpg10.h>
+#include <linux/mfd/samsung/s2mpg10-gs.h>
 #include <linux/mfd/samsung/s2mpg11.h>
 #include <linux/mfd/samsung/rtc-s2mpg10.h>
 #include <dt-bindings/soc/google/gs101-devfreq.h>
@@ -904,7 +904,7 @@ static int acpm_mfd_set_pmic(void)
 	return 0;
 }
 
-unsigned int acpm_pt_clients_enable(void)
+static unsigned int acpm_pt_clients_enable(void)
 {
 	struct pt_handle *client = NULL;
 	unsigned int client_cnt = 0;
@@ -922,7 +922,7 @@ unsigned int acpm_pt_clients_enable(void)
 	return client_cnt;
 }
 
-void acpm_pt_clients_disable(void)
+static void acpm_pt_clients_disable(void)
 {
 	struct pt_handle *client = NULL;
 
@@ -1861,7 +1861,7 @@ err_tmu:
 	return ret;
 }
 
-static int acpm_mbox_test_remove(struct platform_device *pdev)
+static void acpm_mbox_test_remove(struct platform_device *pdev)
 {
 	int i;
 
@@ -1901,7 +1901,6 @@ static int acpm_mbox_test_remove(struct platform_device *pdev)
 
 	dev_info(mbox->device, "%s done.\n", __func__);
 	kfree(mbox);
-	return 0;
 }
 
 static const struct of_device_id acpm_mbox_test_match[] = {

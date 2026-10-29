@@ -750,13 +750,12 @@ static int bci_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int bci_remove(struct platform_device *pdev)
+static void bci_remove(struct platform_device *pdev)
 {
 	struct bci_dev *bci = platform_get_drvdata(pdev);
 
 	debugfs_remove_recursive(bci->de);
 	platform_set_drvdata(pdev, NULL);
-	return 0;
 }
 
 static const struct of_device_id bci_dt_match[] = {

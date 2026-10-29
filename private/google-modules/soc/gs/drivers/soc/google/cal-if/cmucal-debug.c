@@ -4,7 +4,7 @@
 #include <linux/module.h>
 #include <soc/google/cal-if.h>
 #include <soc/google/exynos-pd.h>
-#include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 
 #include "cmucal.h"
 #include "vclk.h"

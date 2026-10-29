@@ -1,4 +1,5 @@
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #if 0
 #include <linux/debug-snapshot.h>
 #endif
@@ -12,7 +13,10 @@
 #endif
 
 #include <soc/google/pwrcal-env.h>
-#include <trace/events/power.h>
+#define CREATE_TRACE_POINTS
+#include <trace/events/gs_clock_rate.h>
+#undef CREATE_TRACE_POINTS
+EXPORT_TRACEPOINT_SYMBOL_GPL(clock_set_rate);
 
 
 #include "pwrcal-rae.h"
@@ -534,7 +538,7 @@ void cal_cp_disable_dump_pc_no_pg(void)
 EXPORT_SYMBOL_GPL(cal_cp_disable_dump_pc_no_pg);
 #endif
 
-int cal_if_init(struct platform_device *pdev)
+static int cal_if_init(struct platform_device *pdev)
 {
 	static int cal_initialized;
 	struct resource res;

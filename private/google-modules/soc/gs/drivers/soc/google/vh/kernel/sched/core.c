@@ -168,12 +168,12 @@ void vh_scheduler_tick_pixel_mod(void *data, struct rq *rq)
 {
 	struct rq_flags rf;
 	rq_lock(rq, &rf);
-	task_tick_uclamp(rq, rq->curr);
-	__update_util_est_invariance(rq, rq->curr, true);
+	task_tick_uclamp(rq, rq->donor);
+	__update_util_est_invariance(rq, rq->donor, true);
 	rq_unlock(rq, &rf);
 
 	/* Check if an RT task needs to move to a better fitting CPU */
-	check_migrate_rt_task(rq, rq->curr);
+	check_migrate_rt_task(rq, rq->donor);
 
 	/* Should be really done when capacity change */
 	update_auto_fits_capacity();
@@ -186,14 +186,23 @@ void vh_scheduler_tick_pixel_mod(void *data, struct rq *rq)
 	gs_perf_mon_tick_update_counters();
 }
 
+void rvh_schedule_pixel_mod(void *data, struct task_struct *prev,
+			    struct task_struct *next, struct rq *rq)
+{
+	struct vendor_rq_struct *vrq = get_vendor_rq_struct(rq);
+	struct task_struct *old_donor = vrq->last_donor;
+
+	lockdep_assert_rq_held(rq);
+	if (old_donor && old_donor != rq->donor && task_on_rq_queued(old_donor) &&
+	    task_is_running(old_donor))
+		__update_util_est_invariance(rq, old_donor, rq->nr_running > 1);
+	vrq->last_donor = rq->donor;
+}
+
 void vh_sched_switch_pixel_mod(void *data, bool preempt, struct task_struct *prev,
 			       struct task_struct *next, unsigned int prev_state)
 {
-	struct rq *rq = task_rq(prev);
-
-	if (task_is_running(prev))
-		__update_util_est_invariance(rq, prev, rq->nr_running > 1);
-
+	/* The group execution trace continues to describe the physical executor. */
 	send_trace_sched_group_tracker(next, true);
 }
 
@@ -217,8 +226,7 @@ void rvh_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p
 
 	if (static_branch_likely(&auto_dvfs_headroom_enable)) {
 		if (vg[get_vendor_group(p)].disable_util_est) {
-			p->se.avg.util_est.enqueued = 0;
-			p->se.avg.util_est.ewma = 0;
+			p->se.avg.util_est = 0;
 		}
 	}
 
@@ -244,6 +252,10 @@ void rvh_dequeue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p
 	struct vendor_task_struct *vp = get_vendor_task_struct(p);
 	unsigned long irqflags;
 	int group;
+
+	/* The rq lock protects this borrow until dequeue/migration releases it. */
+	if (get_vendor_rq_struct(rq)->last_donor == p)
+		get_vendor_rq_struct(rq)->last_donor = NULL;
 
 	if (!static_branch_unlikely(&enqueue_dequeue_ready))
 		return;
@@ -399,10 +411,9 @@ void vh_binder_set_priority_pixel_mod(void *data, struct binder_transaction *t,
 	set_performance_inheritance(p, current, VI_BINDER);
 }
 
-void vh_binder_restore_priority_pixel_mod(void *data, struct binder_transaction *t,
-	struct task_struct *p)
+void vh_binder_restore_priority_pixel_mod(void *data, struct binder_transaction *t)
 {
-	set_performance_inheritance(p, NULL, VI_BINDER);
+	set_performance_inheritance(current, NULL, VI_BINDER);
 }
 
 void vh_binder_proc_transaction_finish(void *data, struct binder_proc *proc,

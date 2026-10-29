@@ -14,7 +14,7 @@
 			       " is not aligned the same as "			\
 			       __stringify(_new) );
 
-// Maximum size: u64[2] for ANDROID_VENDOR_DATA_ARRAY(1, 2) in task_struct
+/* The per-task scheduler overlay is checked against its actual owner below. */
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
 enum utilization_group {
 	UG_BG = 0,
@@ -139,7 +139,10 @@ struct vendor_task_struct {
 	u64 boost_at_fork_start_ns;
 };
 
-ANDROID_VENDOR_CHECK_SIZE_ALIGN(u64 android_vendor_data1[64], struct vendor_task_struct t);
+/* Check the storage actually reserved by this kernel, including debug alignment. */
+ANDROID_VENDOR_CHECK_SIZE_ALIGN(
+	typeof(((struct task_struct *)0)->android_vendor_data1) storage,
+	struct vendor_task_struct t);
 
 static inline struct vendor_task_struct *get_vendor_task_struct(struct task_struct *p)
 {

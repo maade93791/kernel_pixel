@@ -3,10 +3,9 @@
 # Makefile for GCMA
 
 # Needed for the trace points
-CFLAGS_gcma_core.o = -I$(srctree)/$(src)
+CFLAGS_gcma_vendor.o = -I$(src)
 
-obj-$(CONFIG_GCMA) += gcma.o
+obj-$(CONFIG_GCMA_VENDOR) += gcma.o
 
-gcma-y                    := gcma_core.o gcma_sysfs.o
-gcma-$(CONFIG_ANDROID_VENDOR_HOOKS) += gcma_vh.o
+gcma-y                    := gcma_vendor.o gcma_sysfs.o gcma_vh.o
 gcma-$(CONFIG_DEBUG_FS) += gcma_debug.o

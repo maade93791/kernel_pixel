@@ -54,6 +54,7 @@
 #include <linux/fs.h>
 #include <linux/suspend.h>
 #include <soc/google/debug-test.h>
+#include <soc/google/pixel-debug-test.h>
 
 /*
  * Utility functions

@@ -42,7 +42,7 @@ obj-y				    	+= debug/
 obj-$(CONFIG_GOOGLE_EH) += eh/
 
 # GCMA
-obj-$(CONFIG_GCMA) += gcma/
+obj-$(CONFIG_GCMA_VENDOR) += gcma/
 
 # Proactive Kill
 obj-$(CONFIG_PROACTIVE_KILL) += pa_kill/

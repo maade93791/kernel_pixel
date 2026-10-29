@@ -16,6 +16,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/gsa.h>
+#include <linux/gsa/gsa_image_auth.h>
 #include <linux/gsa/gsa_aoc.h>
 #include <linux/gsa/gsa_dsp.h>
 #include <linux/gsa/gsa_kdn.h>
@@ -703,7 +704,7 @@ static const struct file_operations gsa_cdev_fops = {
 	.owner = THIS_MODULE,
 };
 
-int gsa_cdev_init(void)
+static int gsa_cdev_init(void)
 {
 	int ret = alloc_chrdev_region(&gsa_cdev_base_num, 0, MAX_DEVICES, KBUILD_MODNAME);
 
@@ -712,7 +713,7 @@ int gsa_cdev_init(void)
 		return ret;
 	}
 
-	gsa_cdev_class = class_create(THIS_MODULE, KBUILD_MODNAME);
+	gsa_cdev_class = class_create(KBUILD_MODNAME);
 	if (IS_ERR(gsa_cdev_class)) {
 		ret = PTR_ERR(gsa_cdev_class);
 		unregister_chrdev_region(gsa_cdev_base_num, MAX_DEVICES);
@@ -722,7 +723,7 @@ int gsa_cdev_init(void)
 	return 0;
 }
 
-int gsa_cdev_create(struct device *parent, struct gsa_cdev *cdev_node)
+static int gsa_cdev_create(struct device *parent, struct gsa_cdev *cdev_node)
 {
 	int ret;
 	int minor;
@@ -763,13 +764,13 @@ err_device_create:
 	return ret;
 }
 
-void gsa_cdev_remove(struct gsa_cdev *cdev_node)
+static void gsa_cdev_remove(struct gsa_cdev *cdev_node)
 {
 	cdev_del(&cdev_node->cdev);
 	device_destroy(gsa_cdev_class, cdev_node->device_num);
 }
 
-void gsa_cdev_exit(void)
+static void gsa_cdev_exit(void)
 {
 	class_destroy(gsa_cdev_class);
 	unregister_chrdev_region(gsa_cdev_base_num, MAX_DEVICES);
@@ -861,7 +862,7 @@ static int gsa_probe(struct platform_device *pdev)
 	return gsa_cdev_create(dev, &s->cdev_node);
 }
 
-static int gsa_remove(struct platform_device *pdev)
+static void gsa_remove(struct platform_device *pdev)
 {
 	struct gsa_dev_state *s = platform_get_drvdata(pdev);
 
@@ -871,8 +872,6 @@ static int gsa_remove(struct platform_device *pdev)
 	gsa_tz_chan_close(&s->aoc_srv);
 	gsa_tz_chan_close(&s->tpu_srv);
 	gsa_tz_chan_close(&s->dsp_srv);
-
-	return 0;
 }
 
 static const struct of_device_id gsa_of_match[] = {

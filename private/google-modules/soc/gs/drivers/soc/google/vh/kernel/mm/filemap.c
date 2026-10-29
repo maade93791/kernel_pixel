@@ -9,6 +9,8 @@
 #include <linux/mm.h>
 #include <linux/swap.h>
 
+#include "../../include/pixel_mm.h"
+
 /*
  * turn readahead off from page fault handler if free swap size
  * is less than free_swap_threshold_mb.

@@ -8,9 +8,7 @@
 #include <linux/module.h>
 #include <linux/kobject.h>
 #include <soc/google/cpuidle_metrics.h>
-
-extern int thermal_metrics_init(struct kobject *metrics_kobj);
-extern int perf_metrics_init(struct kobject *metrics_kobj);
+#include "metrics.h"
 
 struct kobject *metrics_kobj;
 

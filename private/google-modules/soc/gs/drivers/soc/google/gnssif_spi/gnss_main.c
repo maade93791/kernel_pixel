@@ -17,23 +17,37 @@
 
 #define DEVICE_NAME "gnss"
 
-static void sscd_release(struct device *dev);
+static struct platform_device *sscd_dev;
 
-static struct sscd_platform_data sscd_pdata;
-
-static struct platform_device sscd_dev = {
-	.name            = DEVICE_NAME,
-	.driver_override = SSCD_NAME,
-	.id              = -1,
-	.dev             = {
-		.platform_data = &sscd_pdata,
-		.release       = sscd_release,
-		},
-};
-
-static void sscd_release(struct device *dev)
+static int gnss_sscd_register(void)
 {
-	gif_info("%s: enter\n", __FUNCTION__);
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
+
+	pdev = platform_device_alloc(DEVICE_NAME, PLATFORM_DEVID_NONE);
+	if (!pdev)
+		return -ENOMEM;
+
+	pdev->dev.init_name = DEVICE_NAME;
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	sscd_dev = pdev;
+	return 0;
+
+put_device:
+	platform_device_put(pdev);
+	return ret;
 }
 
 static ssize_t coredump_store(struct device *dev, struct device_attribute *attr, const char *buf,
@@ -148,7 +162,7 @@ static int gnss_pm_notifier(struct notifier_block *notifier,
 	return NOTIFY_OK;
 }
 
-static int gnss_remove(struct platform_device *pdev)
+static void gnss_remove(struct platform_device *pdev)
 {
 	struct gnss_ctl *gc = platform_get_drvdata(pdev);
 
@@ -162,11 +176,13 @@ static int gnss_remove(struct platform_device *pdev)
 
 	gpio_free(gc->gpio_gnss2ap_spi.num);
 
-	platform_device_unregister(&sscd_dev);
-
+	/* Drain the only report entry point before releasing its SSCD device. */
 	device_remove_file(&pdev->dev, &dev_attr_coredump);
+	if (sscd_dev) {
+		platform_device_unregister(sscd_dev);
+		sscd_dev = NULL;
+	}
 
-	return 0;
 }
 
 static int gnss_probe(struct platform_device *pdev)
@@ -226,7 +242,8 @@ static int gnss_probe(struct platform_device *pdev)
 		goto free_ld;
 	}
 
-	platform_device_register(&sscd_dev);
+	if (gnss_sscd_register())
+		gif_err("Unable to register GNSS SSCD device\n");
 
 	if (device_create_file(dev, &dev_attr_coredump))
 		gif_err("Unable to create sysfs coredump entry");
@@ -272,14 +289,15 @@ module_platform_driver(gnss_driver);
 
 int gnss_set_coredump(const char *buf, int buf_len, const char *info)
 {
-	struct sscd_platform_data *pdata = dev_get_platdata(&sscd_dev.dev);
+	struct sscd_platform_data *pdata = sscd_dev ?
+		dev_get_platdata(&sscd_dev->dev) : NULL;
 	struct sscd_segment seg;
 
-	if (pdata->sscd_report) {
+	if (pdata && pdata->sscd_report) {
 		memset(&seg, 0, sizeof(seg));
 		seg.addr = (void *)buf;
 		seg.size = buf_len;
-		pdata->sscd_report(&sscd_dev, &seg, 1, 0, info);
+		pdata->sscd_report(sscd_dev, &seg, 1, 0, info);
 	}
 	return 0;
 }

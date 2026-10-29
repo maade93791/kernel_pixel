@@ -19,7 +19,6 @@ extern int cpu_is_idle(int cpu);
 extern int sched_cpu_idle(int cpu);
 extern int ___update_load_sum(u64 now, struct sched_avg *sa, unsigned long load,
 			      unsigned long runnable, int running);
-extern void ___update_load_avg(struct sched_avg *sa, unsigned long load);
 extern int get_cluster_enabled(int cluster);
 
 extern struct cpumask cpu_skip_mask_rt;
@@ -68,7 +67,7 @@ static inline void rt_task_fits_capacity(struct task_struct *p, int cpu,
 	unsigned long util = task_util(p);
 
 	*fits = util_fits_cpu(util, uclamp_min, uclamp_max, cpu);
-	*fits_original = capacity_orig_of(cpu) >= clamp(util, uclamp_min, uclamp_max) ||
+	*fits_original = arch_scale_cpu_capacity(cpu) >= clamp(util, uclamp_min, uclamp_max) ||
 			 cpu >= pixel_cluster_start_cpu[pixel_cluster_num - 1];
 }
 
@@ -97,7 +96,7 @@ void check_migrate_rt_task(struct rq *rq, struct task_struct *p)
 		return;
 
 	raw_spin_rq_lock(rq);
-	if (task_on_rq_migrating(p))
+	if (p != rq->donor || task_on_rq_migrating(p))
 		goto unlock;
 
 	rt_task_fits_capacity(p, cpu_of(rq), &fits, &fits_orig);
@@ -157,7 +156,7 @@ static int find_least_loaded_cpu(struct task_struct *p, struct cpumask *lowest_m
 	for_each_cpu(cpu, lowest_mask) {
 		is_idle = available_idle_cpu(cpu);
 		exit_lat[cpu] = C1_EXIT_LATENCY; // If cpu is not idle, use C1_EXIT_LATENCY
-		capacity[cpu] = capacity_orig_of(cpu);
+		capacity[cpu] = arch_scale_cpu_capacity(cpu);
 		cpu_importance[cpu] = READ_ONCE(cpu_rq(cpu)->uclamp[UCLAMP_MIN].value) +
 				 READ_ONCE(cpu_rq(cpu)->uclamp[UCLAMP_MAX].value);
 		rq_util_min = uclamp_rq_get(cpu_rq(cpu), UCLAMP_MIN);
@@ -286,8 +285,8 @@ out:
  * functions.
  */
 
-static int __find_lowest_rq(struct task_struct *p, struct cpumask *lowest_mask,
-			    struct cpumask *backup_mask)
+static int __find_lowest_rq(struct task_struct *p, struct task_struct *exec_ctx,
+			    struct cpumask *lowest_mask, struct cpumask *backup_mask)
 {
 	struct sched_domain *sd;
 	int this_cpu = smp_processor_id();
@@ -298,11 +297,10 @@ static int __find_lowest_rq(struct task_struct *p, struct cpumask *lowest_mask,
 	if (unlikely(!lowest_mask))
 		return -1;
 
-	if (p->nr_cpus_allowed == 1) {
-		return cpumask_first(p->cpus_ptr);
-	}
+	if (exec_ctx && exec_ctx->nr_cpus_allowed == 1)
+		return cpumask_first(exec_ctx->cpus_ptr);
 
-	ret = cpupri_find_fitness(&task_rq(p)->rd->cpupri, p, lowest_mask, NULL);
+	ret = cpupri_find_fitness(&task_rq(p)->rd->cpupri, p, exec_ctx, lowest_mask, NULL);
 	if (!ret) {
 		return -1;
 	}
@@ -356,16 +354,17 @@ static int __find_lowest_rq(struct task_struct *p, struct cpumask *lowest_mask,
 static int find_lowest_rq(struct task_struct *p, struct cpumask *backup_mask)
 {
 	struct cpumask lowest_mask;
-	return __find_lowest_rq(p, &lowest_mask, backup_mask);
+	return __find_lowest_rq(p, p, &lowest_mask, backup_mask);
 }
 
 void rvh_find_lowest_rq_pixel_mod(void *data, struct task_struct *p,
+				  struct task_struct *exec_ctx,
 				  struct cpumask *lowest_mask,
 				  int ret, int *cpu)
 
 {
 	struct cpumask backup_mask;
-	*cpu = __find_lowest_rq(p, lowest_mask, &backup_mask);
+	*cpu = __find_lowest_rq(p, exec_ctx, lowest_mask, &backup_mask);
 }
 
 void rvh_select_task_rq_rt_pixel_mod(void *data, struct task_struct *p, int prev_cpu, int sd_flag,

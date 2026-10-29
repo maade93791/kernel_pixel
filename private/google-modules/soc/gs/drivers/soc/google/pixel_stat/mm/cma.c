@@ -10,6 +10,7 @@
 #include <linux/cma.h>
 #include <linux/kobject.h>
 #include <linux/slab.h>
+#include "cma.h"
 #include "../../vh/include/sched.h"
 
 #define DEF_LATENCY_MID_BOUND_MS 1500
@@ -45,6 +46,7 @@ static struct cma_pixel_stat *stats[MAX_CMA_AREAS];
  */
 
 void vh_cma_alloc_start(void *data, const char *name, unsigned long count,
+			unsigned long available_count, unsigned long total_count,
 			unsigned int align)
 {
 	struct vendor_task_struct *tsk;
@@ -71,7 +73,7 @@ static int parse_cma_idx(struct cma *cma, void *data)
 
 void vh_cma_alloc_finish(void *data, const char *name, unsigned long pfn,
 			 const struct page *page, unsigned long count,
-			 unsigned int align)
+			 unsigned int align, int errorno)
 {
 	struct cma_pixel_stat *cma_stat;
 	struct cma_index index = {

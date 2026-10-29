@@ -26,18 +26,19 @@ TRACE_EVENT(gcma_alloc_start,
 		  __entry->start_pfn, __entry->count)
 );
 
-TRACE_EVENT(gcma_alloc_finish,
-        TP_PROTO(unsigned long count, unsigned long discard),
-        TP_ARGS(count, discard),
+/* ACK provides cumulative discard statistics rather than a per-call count. */
+TRACE_EVENT(gcma_heap_alloc_finish,
+        TP_PROTO(unsigned long count, u64 latency_ns),
+        TP_ARGS(count, latency_ns),
         TP_STRUCT__entry(
                 __field(unsigned long, count)
-                __field(unsigned long, discard)
+                __field(u64, latency_ns)
         ),
         TP_fast_assign(
                 __entry->count = count;
-                __entry->discard = discard;
+                __entry->latency_ns = latency_ns;
         ),
-        TP_printk("count=%lu discard=%lu", __entry->count, __entry->discard)
+        TP_printk("count=%lu latency_ns=%llu", __entry->count, __entry->latency_ns)
 );
 
 #endif /* _GCMA_TRACE_H */

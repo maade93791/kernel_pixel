@@ -48,7 +48,7 @@ struct plugin_s2d_info {
 
 static struct plugin_s2d_info plugin_s2d;
 
-int adv_tracer_s2d_scandump(void)
+static int adv_tracer_s2d_scandump(void)
 {
 	if (!plugin_s2d.burnin_ctrl || plugin_s2d.sel_scanmode < 0 ||
 			plugin_s2d.dbgsel_sw < 0) {
@@ -64,7 +64,7 @@ int adv_tracer_s2d_scandump(void)
 	return 0;
 }
 
-int adv_tracer_s2d_arraydump(void)
+static int adv_tracer_s2d_arraydump(void)
 {
 	struct adv_tracer_ipc_cmd cmd = { 0 };
 	int ret = 0;
@@ -145,35 +145,7 @@ static int adv_tracer_s2d_get_all_blk(unsigned long *p_blocks)
 	return 0;
 }
 
-int adv_tracer_s2d_get_blk_by_idx(unsigned int index)
-{
-	unsigned long blocks;
-	int ret;
-
-	if (index >= plugin_s2d.blk_count)
-		return -EINVAL;
-
-	ret = adv_tracer_s2d_get_all_blk(&blocks);
-
-	if (ret)
-		return ret;
-
-	return !!(blocks & BIT(index));
-}
-
-int adv_tracer_s2d_get_blk_by_name(const char *name)
-{
-	unsigned int i;
-
-	for (i = 0; i < plugin_s2d.blk_count; i++) {
-		if (!strcmp(name, plugin_s2d.blk_names[i]))
-			return adv_tracer_s2d_get_blk_by_idx(i);
-	}
-
-	return -EINVAL;
-}
-
-int adv_tracer_s2d_set_blk_by_idx(bool enabled, unsigned int index)
+static int adv_tracer_s2d_set_blk_by_idx(bool enabled, unsigned int index)
 {
 	struct adv_tracer_ipc_cmd cmd = { 0 };
 	int ret = 0;
@@ -202,7 +174,7 @@ int adv_tracer_s2d_set_blk_by_idx(bool enabled, unsigned int index)
 	return 0;
 }
 
-int adv_tracer_s2d_set_blk_by_name(bool enabled, const char *name)
+static int adv_tracer_s2d_set_blk_by_name(bool enabled, const char *name)
 {
 	unsigned int i;
 
@@ -214,7 +186,7 @@ int adv_tracer_s2d_set_blk_by_name(bool enabled, const char *name)
 	return -ENOENT;
 }
 
-int adv_tracer_s2d_set_all_blk(bool en)
+static int adv_tracer_s2d_set_all_blk(bool en)
 {
 	struct adv_tracer_ipc_cmd cmd = { 0 };
 	int ret = 0;
@@ -490,7 +462,7 @@ static int adv_tracer_s2d_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 	struct adv_tracer_plugin *s2d = NULL;
-	int ret;
+	int ret, release_ret;
 
 	s2d = devm_kzalloc(&pdev->dev, sizeof(struct adv_tracer_plugin),
 			GFP_KERNEL);
@@ -512,17 +484,17 @@ static int adv_tracer_s2d_probe(struct platform_device *pdev)
 
 	ret = adv_tracer_s2d_get_enable();
 	if (ret < 0)
-		goto err_sysfs_probe;
+		goto err_release_channel;
 	dev_info(&pdev->dev, "S2D %sabled\n", plugin_s2d.enable ? "en" : "dis");
 	ret = adv_tracer_s2d_dt_init(pdev);
 	if (ret < 0)
-		goto err_sysfs_probe;
+		goto err_release_channel;
 
 	platform_set_drvdata(pdev, s2d);
 	ret = sysfs_create_groups(&pdev->dev.kobj, adv_tracer_s2d_sysfs_groups);
 	if (ret) {
 		dev_err(&pdev->dev, "fail to register sysfs.\n");
-		return ret;
+		goto err_release_channel;
 	}
 
 	dbg_snapshot_register_debug_ops(NULL,
@@ -534,19 +506,17 @@ static int adv_tracer_s2d_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "%s successful.\n", __func__);
 	return 0;
 
+err_release_channel:
+	release_ret = adv_tracer_ipc_release_channel(s2d->id);
+	if (release_ret)
+		dev_err(&pdev->dev, "failed to release s2d channel: %d\n", release_ret);
 err_sysfs_probe:
+	platform_set_drvdata(pdev, NULL);
+	plugin_s2d.s2d_dev = NULL;
+	plugin_s2d.dev = NULL;
 	devm_kfree(&pdev->dev, s2d);
 err_s2d_info:
 	return ret;
-}
-
-static int adv_tracer_s2d_remove(struct platform_device *pdev)
-{
-	struct adv_tracer_plugin *s2d = platform_get_drvdata(pdev);
-
-	adv_tracer_ipc_release_channel(s2d->id);
-
-	return 0;
 }
 
 static const struct of_device_id adv_tracer_s2d_match[] = {
@@ -557,14 +527,19 @@ MODULE_DEVICE_TABLE(of, adv_tracer_s2d_match);
 
 static struct platform_driver adv_tracer_s2d_driver = {
 	.probe          = adv_tracer_s2d_probe,
-	.remove         = adv_tracer_s2d_remove,
 	.driver         = {
 		.name   = "exynos-adv-tracer-s2d",
+		.suppress_bind_attrs = true,
 		.owner  = THIS_MODULE,
 		.of_match_table = of_match_ptr(adv_tracer_s2d_match),
 	},
 };
-module_platform_driver(adv_tracer_s2d_driver);
+/* Debug snapshot and keydebug retain callbacks for the lifetime of the kernel. */
+static int __init adv_tracer_s2d_init(void)
+{
+	return platform_driver_register(&adv_tracer_s2d_driver);
+}
+module_init(adv_tracer_s2d_init);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("EXYNOS Advanced Tracer for S2D Driver");

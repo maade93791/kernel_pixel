@@ -34,21 +34,38 @@ static struct adv_tracer_ipc_main *eat_ipc;
 
 #define DEVICE_NAME "debugcore"
 
-static void adv_tracer_ipc_sscd_release(struct device *dev)
+static struct platform_device *sscd_dev;
+
+static int adv_tracer_ipc_sscd_register(void)
 {
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
 
+	pdev = platform_device_alloc(DEVICE_NAME, PLATFORM_DEVID_NONE);
+	if (!pdev)
+		return -ENOMEM;
+
+	pdev->dev.init_name = DEVICE_NAME;
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	sscd_dev = pdev;
+	return 0;
+
+put_device:
+	platform_device_put(pdev);
+	return ret;
 }
-
-static struct sscd_platform_data sscd_pdata;
-static struct platform_device sscd_dev = {
-	.name            = DEVICE_NAME,
-	.driver_override = SSCD_NAME,
-	.id              = -1,
-	.dev             = {
-		.platform_data = &sscd_pdata,
-		.release       = adv_tracer_ipc_sscd_release,
-	},
-};
 #endif
 
 
@@ -306,8 +323,8 @@ static int adv_tracer_ipc_channel_init(unsigned int id, unsigned int offset,
 	channel->buff_regs = (void __iomem *)(eat_ipc->mailbox_base + offset);
 	channel->cmd = devm_kzalloc(eat_ipc->dev,
 			sizeof(struct adv_tracer_ipc_cmd), GFP_KERNEL);
-	if (IS_ERR(channel->cmd))
-		return PTR_ERR(channel->cmd);
+	if (!channel->cmd)
+		return -ENOMEM;
 
 	channel->ipc_callback = handler;
 	channel->used = true;
@@ -446,7 +463,8 @@ static void eat_ipc_dbgc_panic(void)
 static void eat_ipc_callback(struct adv_tracer_ipc_cmd *cmd, unsigned int len)
 {
 #ifdef ADV_TRACER_SSCOREDUMP
-	struct sscd_platform_data *pdata = dev_get_platdata(&sscd_dev.dev);
+	struct sscd_platform_data *pdata = sscd_dev ?
+		dev_get_platdata(&sscd_dev->dev) : NULL;
 #endif
 
 	switch (cmd->cmd_raw.cmd) {
@@ -458,7 +476,7 @@ static void eat_ipc_callback(struct adv_tracer_ipc_cmd *cmd, unsigned int len)
 				"DBGC occurred exception! (SP:0x%x, LR:0x%x, PC:0x%x)\n",
 				cmd->buffer[1], cmd->buffer[2], cmd->buffer[3]);
 #ifdef ADV_TRACER_SSCOREDUMP
-		if (pdata->sscd_report) {
+		if (pdata && pdata->sscd_report) {
 			char msg[80];
 			struct sscd_segment seg;
 
@@ -468,7 +486,7 @@ static void eat_ipc_callback(struct adv_tracer_ipc_cmd *cmd, unsigned int len)
 			scnprintf(msg, sizeof(msg),
 				"DBGC occurred exception! (SP: 0x%x, LR:0x%x, PC:0x%x)\n",
 				cmd->buffer[1], cmd->buffer[2], cmd->buffer[3]);
-			pdata->sscd_report(&sscd_dev, &seg, 1, 0, msg);
+			pdata->sscd_report(sscd_dev, &seg, 1, 0, msg);
 		}
 #endif
 		if (eat_ipc->recovery)
@@ -490,8 +508,8 @@ static int adv_tracer_ipc_channel_probe(void)
 	eat_ipc->channel = devm_kcalloc(eat_ipc->dev, eat_ipc->num_channels,
 			sizeof(struct adv_tracer_ipc_ch), GFP_KERNEL);
 
-	if (IS_ERR(eat_ipc->channel))
-		return PTR_ERR(eat_ipc->channel);
+	if (!eat_ipc->channel)
+		return -ENOMEM;
 
 	for (i = 0; i < eat_ipc->num_channels; i++) {
 		init_completion(&eat_ipc->channel[i].wait);
@@ -519,49 +537,27 @@ static int adv_tracer_ipc_channel_probe(void)
 static int adv_tracer_ipc_init(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
-	int ret = 0;
-	struct cpumask aff_mask;
+	struct cpumask *aff_mask;
 	const char *buf;
+	int irq, ret;
 
 	eat_ipc = devm_kzalloc(&pdev->dev,
 			sizeof(struct adv_tracer_ipc_main), GFP_KERNEL);
 	if (!eat_ipc)
 		return -ENODEV;
+	eat_ipc->dev = &pdev->dev;
 
 	/* Mailbox interrupt, AP -- Debug Core */
-	eat_ipc->irq = platform_get_irq(pdev, 0);
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
+	eat_ipc->irq = irq;
 	eat_ipc->recovery = false;
 
 	/* Mailbox base register */
 	eat_ipc->mailbox_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(eat_ipc->mailbox_base))
-		return -ENODEV;
-
-	adv_tracer_ipc_interrupt_clear(EAT_FRM_CHANNEL);
-	ret = devm_request_threaded_irq(&pdev->dev, eat_ipc->irq,
-			adv_tracer_ipc_irq_handler,
-			adv_tracer_ipc_irq_handler_thread,
-			IRQF_ONESHOT, dev_name(&pdev->dev), eat_ipc);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to register interrupt: %d\n", ret);
-		return ret;
-	}
-	ret = of_property_read_string(node, "irq_affinity", &buf);
-	if (!ret) {
-		cpulist_parse(buf, &aff_mask);
-		ret = irq_set_affinity_hint(eat_ipc->irq, &aff_mask);
-		if (ret) {
-			dev_err(&pdev->dev, "failed to set interrupt affinity: %d\n", ret);
-			return ret;
-		}
-	}
-	eat_ipc->dev = &pdev->dev;
-
-	ret = adv_tracer_ipc_channel_probe();
-	if (ret) {
-		dev_err(&pdev->dev, "failed to register channel: %d\n", ret);
-		return ret;
-	}
+		return PTR_ERR(eat_ipc->mailbox_base);
 
 	if (of_property_read_u32(node, "pmu-dbgcore-config",
 				&eat_ipc->dbgc_config))
@@ -573,11 +569,60 @@ static int adv_tracer_ipc_init(struct platform_device *pdev)
 				&eat_ipc->intr_bitoffset))
 		eat_ipc->intr_bitoffset = INTR_FLAG_OFFSET;
 
+	adv_tracer_ipc_interrupt_clear(EAT_FRM_CHANNEL);
+	ret = devm_request_threaded_irq(&pdev->dev, eat_ipc->irq,
+			adv_tracer_ipc_irq_handler,
+			adv_tracer_ipc_irq_handler_thread,
+			IRQF_ONESHOT | IRQF_NO_AUTOEN, dev_name(&pdev->dev), eat_ipc);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to register interrupt: %d\n", ret);
+		return ret;
+	}
+
+	ret = of_property_read_string(node, "irq_affinity", &buf);
+	if (!ret) {
+		/* IRQ affinity hints retain this mask until the hint is cleared. */
+		aff_mask = devm_kzalloc(&pdev->dev, cpumask_size(), GFP_KERNEL);
+		if (!aff_mask) {
+			ret = -ENOMEM;
+			goto free_irq;
+		}
+		ret = cpulist_parse(buf, aff_mask);
+		if (ret)
+			goto free_irq;
+		ret = irq_set_affinity_hint(eat_ipc->irq, aff_mask);
+		if (ret) {
+			dev_err(&pdev->dev, "failed to set interrupt affinity: %d\n", ret);
+			goto free_irq;
+		}
+	}
+
 #ifdef ADV_TRACER_SSCOREDUMP
-	platform_device_register(&sscd_dev);
+	if (adv_tracer_ipc_sscd_register())
+		dev_warn(&pdev->dev, "failed to register debugcore SSCD device\n");
 #endif
 
+	ret = adv_tracer_ipc_channel_probe();
+	if (ret) {
+		dev_err(&pdev->dev, "failed to register channel: %d\n", ret);
+		goto free_irq;
+	}
+
+	/* Framework buffers, recovery state and optional reporting are ready. */
+	enable_irq(eat_ipc->irq);
 	dev_info(&pdev->dev, "%s successful.\n", __func__);
+	return 0;
+
+free_irq:
+	irq_set_affinity_hint(eat_ipc->irq, NULL);
+	/* Drain callbacks before devres can release their channel buffers. */
+	devm_free_irq(&pdev->dev, eat_ipc->irq, eat_ipc);
+#ifdef ADV_TRACER_SSCOREDUMP
+	if (sscd_dev) {
+		platform_device_unregister(sscd_dev);
+		sscd_dev = NULL;
+	}
+#endif
 	return ret;
 }
 
@@ -592,8 +637,12 @@ static int adv_tracer_probe(struct platform_device *pdev)
 
 	adv_tracer->dev = &pdev->dev;
 	eat_info = adv_tracer;
-	if (adv_tracer_ipc_init(pdev))
+	ret = adv_tracer_ipc_init(pdev);
+	if (ret) {
+		eat_ipc = NULL;
+		eat_info = NULL;
 		goto out;
+	}
 
 	dev_info(&pdev->dev, "%s successful.\n", __func__);
 out:
@@ -610,11 +659,17 @@ static struct platform_driver eat_info_driver = {
 	.probe	= adv_tracer_probe,
 	.driver	= {
 		.name = "exynos-adv-tracer",
+		.suppress_bind_attrs = true,
 		.owner	= THIS_MODULE,
 		.of_match_table	= eat_match,
 	},
 };
-module_platform_driver(eat_info_driver);
+/* Global IPC users and framework callbacks require kernel-lifetime state. */
+static int __init adv_tracer_init(void)
+{
+	return platform_driver_register(&eat_info_driver);
+}
+module_init(adv_tracer_init);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Exynos Advanced Tracer Driver");

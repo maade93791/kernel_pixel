@@ -6,6 +6,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/sched.h>
@@ -16,6 +17,8 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <soc/google/acpm_ipc_ctrl.h>
+#include <soc/google/exynos-pm.h>
+#include <soc/google/exynos-flexpmu-dbg.h>
 
 #define ACPM_FLEXPMU_DBG_PREFIX	"ACPM-FLEXPMU-DBG: "
 
@@ -498,7 +501,7 @@ err_flexpmu_info:
 	return ret;
 }
 
-static int exynos_flexpmu_dbg_remove(struct platform_device *pdev)
+static void exynos_flexpmu_dbg_remove(struct platform_device *pdev)
 {
 	struct dbgfs_info *flexpmu_dbg_info = platform_get_drvdata(pdev);
 
@@ -506,7 +509,6 @@ static int exynos_flexpmu_dbg_remove(struct platform_device *pdev)
 	kfree(flexpmu_dbg_info);
 	platform_set_drvdata(pdev, NULL);
 
-	return 0;
 }
 
 static const struct of_device_id exynos_flexpmu_dbg_match[] = {

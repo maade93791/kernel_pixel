@@ -8,6 +8,7 @@
 
 #include <linux/kernel_stat.h>
 #include <linux/module.h>
+#include <linux/vmalloc.h>
 #include <linux/nmi.h>
 #include <linux/platform_device.h>
 #include <linux/rtc.h>

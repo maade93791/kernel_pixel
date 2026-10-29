@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/of_platform.h>
+#include <linux/of.h>
 #include <linux/syscore_ops.h>
 #include <linux/slab.h>
 

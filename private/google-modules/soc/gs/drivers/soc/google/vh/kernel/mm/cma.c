@@ -11,6 +11,8 @@
 #include <linux/kobject.h>
 #include <linux/slab.h>
 
+#include "../../include/pixel_mm.h"
+
 extern struct kobject *vendor_mm_kobj;
 
 struct cma_node {
