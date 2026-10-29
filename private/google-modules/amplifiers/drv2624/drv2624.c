@@ -1087,7 +1087,7 @@ static ssize_t mode_store(struct device *dev,
 	unsigned char new_mode;
 
 	mode_name[sizeof(mode_name) - 1] = '\0';
-	strlcpy(mode_name, buf, sizeof(mode_name) - 1);
+	strscpy(mode_name, buf, sizeof(mode_name) - 1);
 	len = strlen(mode_name);
 
 	if (len && mode_name[len - 1] == '\n')
@@ -1663,8 +1663,7 @@ static struct attribute_group drv2624_fs_attr_group = {
 	.attrs = drv2624_fs_attrs,
 };
 
-static int drv2624_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int drv2624_i2c_probe(struct i2c_client *client)
 {
 	struct drv2624_data *drv2624;
 	int err = 0;
@@ -1715,8 +1714,9 @@ static int drv2624_i2c_probe(struct i2c_client *client,
 	}
 
 	if (gpio_is_valid(drv2624->plat_data.gpio_nrst)) {
-		err = devm_gpio_request(&client->dev,
+		err = devm_gpio_request_one(&client->dev,
 					drv2624->plat_data.gpio_nrst,
+					GPIOF_OUT_INIT_LOW,
 					"DRV2624-NRST");
 		if (err < 0) {
 			dev_err(drv2624->dev,
@@ -1725,7 +1725,6 @@ static int drv2624_i2c_probe(struct i2c_client *client,
 			return err;
 		}
 
-		gpio_direction_output(drv2624->plat_data.gpio_nrst, 0);
 		usleep_range(1000, 2000);
 		gpio_direction_output(drv2624->plat_data.gpio_nrst, 1);
 		usleep_range(1000, 2000); /* t(on) = 1ms */
@@ -1749,8 +1748,9 @@ static int drv2624_i2c_probe(struct i2c_client *client,
 	dev_init_platform_data(drv2624);
 
 	if (gpio_is_valid(drv2624->plat_data.gpio_int)) {
-		err = devm_gpio_request(&client->dev,
+		err = devm_gpio_request_one(&client->dev,
 					drv2624->plat_data.gpio_int,
+					GPIOF_IN,
 					"DRV2624-IRQ");
 		if (err < 0) {
 			dev_err(drv2624->dev,
@@ -1758,8 +1758,6 @@ static int drv2624_i2c_probe(struct i2c_client *client,
 				__func__, drv2624->plat_data.gpio_int);
 			goto drv2624_i2c_probe_err;
 		}
-
-		gpio_direction_input(drv2624->plat_data.gpio_int);
 
 		drv2624->irq = gpio_to_irq(drv2624->plat_data.gpio_int);
 		dev_dbg(drv2624->dev, "irq = %d\n", drv2624->irq);
