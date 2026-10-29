@@ -10,6 +10,8 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 
+#include "tcpci_otg_helper.h"
+
 #define COMMAND_REGISTER	0x7a
 #define CLEAR_RESET_LOCK	0x0
 #define ENABLE_TCPC_CONTROL	0x23
@@ -43,8 +45,7 @@ int enable_ls(struct i2c_client *client)
 }
 EXPORT_SYMBOL_GPL(enable_ls);
 
-static int slg46826_probe(struct i2c_client *client,
-			  const struct i2c_device_id *i2c_id)
+static int slg46826_probe(struct i2c_client *client)
 {
 	struct regmap *regmap;
 

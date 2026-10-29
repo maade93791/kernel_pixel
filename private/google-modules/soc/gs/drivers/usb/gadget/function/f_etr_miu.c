@@ -22,6 +22,7 @@
 #include <linux/types.h>
 #include <linux/usb/composite.h>
 #include <linux/wait.h>
+#include <soc/google/exynos-coresight.h>
 #include "../../dwc3/gadget.h"
 
 #define MAX_INST_NAME_LEN 40
@@ -196,9 +197,6 @@ etr_miu_create_bulk_endpoints(struct etr_miu_dev *dev,
 
 	return 0;
 }
-
-extern int gs_coresight_etm_external_etr_on(u64 buf_addr, u32 buf_size);
-extern int gs_coresight_etm_external_etr_off(void);
 
 static int etr_miu_function_bind(struct usb_configuration *c,
 				 struct usb_function *f)

@@ -662,8 +662,7 @@ static void fusb307b_teardown_data_notifier(struct fusb307b_plat *chip)
 		usb_role_switch_unregister(chip->usb_sw);
 }
 
-static int fusb307b_probe(struct i2c_client *client,
-			  const struct i2c_device_id *i2c_id)
+static int fusb307b_probe(struct i2c_client *client)
 {
 	int ret;
 	struct fusb307b_plat *chip;

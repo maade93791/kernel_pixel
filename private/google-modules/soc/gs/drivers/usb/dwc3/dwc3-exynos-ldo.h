@@ -11,7 +11,6 @@
 #define __LINUX_USB_DWC3_EXYNOS_LDO_H
 
 #include <soc/google/exynos-pd_hsi0.h>
-
-int exynos_usbdrd_s2mpu_manual_control(bool on);
+#include <soc/google/exynos-usb-phy.h>
 
 #endif /* __LINUX_USB_DWC3_EXYNOS_LDO_H */

@@ -16,6 +16,7 @@
 
 #include <misc/gvotable.h>
 #include <soc/google/exynos_pm_qos.h>
+#include <soc/google/exynos-usb-phy.h>
 
 /**
  * struct dwc3_otg: OTG driver data. Shared by HCD and DCD.
@@ -60,14 +61,13 @@ int dwc3_exynos_otg_init(struct dwc3 *dwc, struct dwc3_exynos *exynos);
 void dwc3_exynos_otg_exit(struct dwc3 *dwc, struct dwc3_exynos *exynos);
 bool dwc3_otg_check_usb_suspend(struct dwc3_exynos *exynos);
 int dwc3_otg_start_host(struct dwc3_otg *dotg, int on);
+int dwc3_otg_host_ready(bool ready);
+u32 dwc3_otg_is_connect(void);
+int dwc3_otg_get_idle_ip_index(void);
 int dwc3_otg_start_gadget(struct dwc3_otg *dotg, int on);
 void dwc3_otg_gadget_handler(struct usb_gadget *gadget, bool status);
 enum usb_role dwc3_exynos_wait_role(struct dwc3_otg *dotg);
 void dwc3_exynos_set_role(struct dwc3_otg *dotg);
 int usb_power_notify_control(int on);
-
-extern void __iomem *phycon_base_addr;
-extern int exynos_usbdrd_pipe3_enable(struct phy *phy);
-extern int exynos_usbdrd_pipe3_disable(struct phy *phy);
 
 #endif /* __LINUX_USB_DWC3_OTG_H */
