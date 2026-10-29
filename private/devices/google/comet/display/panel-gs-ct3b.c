@@ -1882,7 +1882,7 @@ static int spanel_get_brightness(struct thermal_zone_device *tzd, int *temp)
 	if (tzd == NULL)
 		return -EINVAL;
 
-	spanel = tzd->devdata;
+	spanel = thermal_zone_device_priv(tzd);
 
 	if (spanel && spanel->base.bl) {
 		mutex_lock(&spanel->base.bl_state_lock);
@@ -1975,11 +1975,12 @@ static int ct3b_panel_probe(struct mipi_dsi_device *dsi)
 	if (ret)
 		return ret;
 
-	ctx->thermal->tz = thermal_zone_device_register("inner_brightness",
-				0, 0, spanel, &spanel_tzd_ops, NULL, 0, 0);
+	ctx->thermal->tz = thermal_tripless_zone_device_register("inner_brightness",
+				spanel, &spanel_tzd_ops, NULL);
 	if (IS_ERR(ctx->thermal->tz)) {
 		dev_warn(ctx->dev, "failed to register inner"
 			" display thermal zone: %ld", PTR_ERR(ctx->thermal->tz));
+		ctx->thermal->tz = NULL;
 		return 0;
 	}
 
@@ -1988,6 +1989,7 @@ static int ct3b_panel_probe(struct mipi_dsi_device *dsi)
 		dev_warn(ctx->dev, "failed to enable inner"
 			" display thermal zone ret=%d", ret);
 		thermal_zone_device_unregister(ctx->thermal->tz);
+		ctx->thermal->tz = NULL;
 	}
 
 	return 0;
@@ -1997,8 +1999,10 @@ static void ct3b_panel_remove(struct mipi_dsi_device *dsi)
 {
 	const struct gs_panel *ctx = mipi_dsi_get_drvdata(dsi);
 
-	if (ctx->thermal && ctx->thermal->tz)
+	if (ctx->thermal && ctx->thermal->tz) {
 		thermal_zone_device_unregister(ctx->thermal->tz);
+		ctx->thermal->tz = NULL;
+	}
 	gs_dsi_panel_common_remove(dsi);
 }
 

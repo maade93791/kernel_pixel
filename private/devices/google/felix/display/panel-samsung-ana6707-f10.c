@@ -11,6 +11,7 @@
 
 #include <drm/drm_vblank.h>
 #include <linux/debugfs.h>
+#include <linux/device.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/thermal.h>
@@ -1325,7 +1326,7 @@ static int spanel_get_brightness(struct thermal_zone_device *tzd, int *temp)
 	if (tzd == NULL)
 		return -EINVAL;
 
-	spanel = tzd->devdata;
+	spanel = thermal_zone_device_priv(tzd);
 
 	if (spanel && spanel->base.bl) {
 		mutex_lock(&spanel->base.bl_state_lock);
@@ -1343,31 +1344,67 @@ static struct thermal_zone_device_ops spanel_tzd_ops = {
 	.get_temp = spanel_get_brightness,
 };
 
+static void ana6707_f10_unregister_thermal(void *data)
+{
+	struct ana6707_f10_panel *spanel = data;
+
+	thermal_zone_device_unregister(spanel->tzd);
+	spanel->tzd = NULL;
+}
+
 static int ana6707_f10_panel_probe(struct mipi_dsi_device *dsi)
 {
+	struct device *dev = &dsi->dev;
 	struct ana6707_f10_panel *spanel;
 	int ret;
 
-	spanel = devm_kzalloc(&dsi->dev, sizeof(*spanel), GFP_KERNEL);
+	spanel = devm_kzalloc(dev, sizeof(*spanel), GFP_KERNEL);
 	if (!spanel)
 		return -ENOMEM;
 
 	spanel->auto_mode_vrefresh = 0;
 	spanel->delayed_idle = false;
 	spanel->is_pixel_off = false;
-	spanel->tzd = thermal_zone_device_register("inner-disp",
-				0, 0, spanel, &spanel_tzd_ops, NULL, 0, 0);
-	if (IS_ERR(spanel->tzd))
-		dev_err(spanel->base.dev, "failed to register inner"
-			" display thermal zone: %ld", PTR_ERR(spanel->tzd));
+
+	ret = exynos_panel_common_init(dsi, &spanel->base);
+	if (ret)
+		return ret;
+
+	/* Registration can read brightness, so the backlight and lock must exist. */
+	spanel->tzd = thermal_tripless_zone_device_register("inner-disp",
+				spanel, &spanel_tzd_ops, NULL);
+	if (IS_ERR(spanel->tzd)) {
+		dev_err(dev, "failed to register inner display thermal zone: %ld\n",
+			PTR_ERR(spanel->tzd));
+		spanel->tzd = NULL;
+		return 0;
+	}
+
+	ret = devm_add_action_or_reset(dev, ana6707_f10_unregister_thermal, spanel);
+	if (ret) {
+		dev_err(dev, "failed to manage inner display thermal zone: %d\n", ret);
+		return 0;
+	}
 
 	ret = thermal_zone_device_enable(spanel->tzd);
 	if (ret) {
-		dev_err(spanel->base.dev, "failed to enable inner"
-					" display thermal zone ret=%d", ret);
-		thermal_zone_device_unregister(spanel->tzd);
+		dev_err(dev, "failed to enable inner display thermal zone: %d\n", ret);
+		devm_release_action(dev, ana6707_f10_unregister_thermal, spanel);
 	}
-	return exynos_panel_common_init(dsi, &spanel->base);
+
+	return 0;
+}
+
+static void ana6707_f10_panel_remove(struct mipi_dsi_device *dsi)
+{
+	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	struct ana6707_f10_panel *spanel = to_spanel(ctx);
+
+	/* Drain thermal readers before common removal releases the backlight. */
+	if (spanel->tzd)
+		devm_release_action(&dsi->dev, ana6707_f10_unregister_thermal, spanel);
+
+	exynos_panel_remove(dsi);
 }
 
 static const struct drm_panel_funcs ana6707_f10_drm_funcs = {
@@ -1461,7 +1498,7 @@ MODULE_DEVICE_TABLE(of, exynos_panel_of_match);
 
 static struct mipi_dsi_driver exynos_panel_driver = {
 	.probe = ana6707_f10_panel_probe,
-	.remove = exynos_panel_remove,
+	.remove = ana6707_f10_panel_remove,
 	.driver = {
 		.name = "panel-samsung-ana6707-f10",
 		.of_match_table = exynos_panel_of_match,

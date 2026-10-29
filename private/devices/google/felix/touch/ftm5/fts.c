@@ -51,6 +51,7 @@
 
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 
 #ifdef KERNEL_ABOVE_2_6_38
@@ -112,7 +113,7 @@ static const struct dev_pm_ops fts_pm_ops;
   * Clear touch flags
   * @param info pointer to fts_ts_info which contains info about device/hw setup
   */
-void clear_touch_flags(struct fts_ts_info *info)
+static void clear_touch_flags(struct fts_ts_info *info)
 {
 	info->touch_id = 0;
 	info->palm_touch_mask = 0;
@@ -539,7 +540,7 @@ END:
   * @return OK if is possible to enable/disable feature, ERROR_OP_NOT_ALLOW
   * in case of any other conflict
   */
-int check_feature_feasibility(struct fts_ts_info *info, unsigned int feature)
+static int check_feature_feasibility(struct fts_ts_info *info, unsigned int feature)
 {
 	int res = OK;
 
@@ -1412,7 +1413,7 @@ static ssize_t gesture_coordinates_show(struct device *dev,
   * - F1 = Perform a system reset and reenable the sensing and the interrupt
   */
 static ssize_t stm_fts_cmd_write(struct file *fp, struct kobject *kobj,
-				 struct bin_attribute *battr, char *buf,
+				 const struct bin_attribute *battr, char *buf,
 				 loff_t offset, size_t count)
 {
 	u8 result, n = 0;
@@ -1521,7 +1522,7 @@ out:
 }
 
 static ssize_t stm_fts_cmd_read(struct file *fp, struct kobject *kobj,
-				struct bin_attribute *battr, char *buf,
+				const struct bin_attribute *battr, char *buf,
 				loff_t offset, size_t count)
 {
 	int res, j, doClean = 0, index = 0;
@@ -2438,7 +2439,7 @@ static DEVICE_ATTR_RW(autotune);
 
 static BIN_ATTR_RW(stm_fts_cmd, 0);
 
-static struct bin_attribute *fts_bin_attr_group[] = {
+static const struct bin_attribute *const fts_bin_attr_group[] = {
 	&bin_attr_stm_fts_cmd,
 	NULL,
 };
@@ -2878,13 +2879,15 @@ static int get_palm_mode(void *private_data, struct gti_palm_cmd *cmd)
   * and its hw setup
   * @param key_code	button value
   */
-void fts_input_report_key(struct fts_ts_info *info, int key_code)
+#if defined(PHONE_KEY) || defined(GESTURE_MODE)
+static void fts_input_report_key(struct fts_ts_info *info, int key_code)
 {
 	input_report_key(info->input_dev, key_code, 1);
 	input_sync(info->input_dev);
 	input_report_key(info->input_dev, key_code, 0);
 	input_sync(info->input_dev);
 }
+#endif
 
 /**
   * Event Handler for no events (EVT_ID_NOEVENT)
@@ -4416,7 +4419,8 @@ static void fts_fw_update_auto(struct work_struct *work)
  *  Save the golden MS raw data to the touch IC if firmware has separated it
  *  from the PI process.
  */
-int save_golden_ms_raw(struct fts_ts_info *info)
+#ifndef COMPUTE_INIT_METHOD
+static int save_golden_ms_raw(struct fts_ts_info *info)
 {
 	u8 cmd[3] = {0xC0, 0x01, 0x01};
 	int ret = 0;
@@ -4430,6 +4434,7 @@ int save_golden_ms_raw(struct fts_ts_info *info)
 	}
 	return ret;
 }
+#endif
 
 /* TODO: define if need to do the full mp at the boot */
 /**
@@ -5353,13 +5358,11 @@ static int parse_dt(struct device *dev, struct fts_hw_platform_data *bdata)
 		}
 	}
 
-	bdata->irq_gpio = of_get_named_gpio_flags(np, "st,irq-gpio", 0, NULL);
+	bdata->irq_gpio = of_get_named_gpio(np, "st,irq-gpio", 0);
 	dev_info(dev, "irq_gpio = %d\n", bdata->irq_gpio);
 
 	if (of_property_read_bool(np, "st,reset-gpio")) {
-		bdata->reset_gpio = of_get_named_gpio_flags(np,
-							    "st,reset-gpio", 0,
-							    NULL);
+		bdata->reset_gpio = of_get_named_gpio(np, "st,reset-gpio", 0);
 		dev_info(dev, "reset_gpio = %d\n", bdata->reset_gpio);
 	} else
 		bdata->reset_gpio = GPIO_NOT_DEFINED;

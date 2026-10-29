@@ -15,8 +15,10 @@ package(
 
 _KERNEL_TARGETS = [
     # keep sorted
+    "Makefile",
     "aarch64_additional_kmi_symbol_lists",
     "all_headers_aarch64",
+    "arch/arm64/configs/gki_defconfig",
     "include/uapi/drm/drm_fourcc.h",
     "include/uapi/sound/asound.h",
     "include/uapi/sound/compress_offload.h",
@@ -28,6 +30,7 @@ _KERNEL_TARGETS = [
     "kernel_aarch64_images",
     "kernel_aarch64_modules",
     "kernel_aarch64_sources",
+    "scripts/checkpatch.pl",
     "set_kernel_dir_build_config",
 ]
 
@@ -39,25 +42,6 @@ kernel_selection(
             name = "ack",
             aliases = ["@//aosp"],
             package = "//common/ack",
-        ),
-        kernel_package(
-            name = "gki",
-            aliases = ["@//aosp-with-prebuilts"],
-            package = "//common/gki",
-            prebuilt_repos = {
-                "kernel_aarch64": "download_or_build",
-                "kernel_aarch64_16k": "download_or_build",
-            },
-        ),
-        kernel_package(
-            name = "staging",
-            aliases = ["@//aosp-staging"],
-            package = "//common/staging",
-        ),
-        kernel_package(
-            name = "bringup",
-            aliases = ["@//aosp-bringup"],
-            package = "//common/bringup",
         ),
     ],
     targets = _KERNEL_TARGETS,
