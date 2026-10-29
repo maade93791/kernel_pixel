@@ -3039,8 +3039,8 @@ int aoc_audio_voip_stop(struct aoc_alsa_stream *alsa_stream)
 /* TODO: this function is modified to deal with the issue where ALSA appl_ptr
  * and the reader pointer in AoC ringer buffer are out-of-sync due to overflow
  */
-int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
-		   uint32_t count)
+int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, struct iov_iter *dest,
+		   size_t count)
 {
 	int err = 0;
 	void *tmp;
@@ -3054,16 +3054,16 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 	avail = aoc_ring_bytes_available_to_read(dev->service, AOC_UP);
 
 	if (unlikely(avail < count)) {
-		pr_err("ERR: overrun in audio capture. avail = %d, toread = %d\n",
+		pr_err("ERR: overrun in audio capture. avail = %u, toread = %zu\n",
 		       avail, count);
 	}
 
 	/* Only read bytes available in the ring buffer */
-	avail = min(avail, count);
+	avail = min_t(size_t, avail, count);
 	if (avail) {
 		err = aoc_service_read(dev, (void *)tmp, avail, NONBLOCKING);
 		if (unlikely(err != avail)) {
-			pr_err("ERR: %d bytes not read from ring buffer\n",
+			pr_err("ERR: %zu bytes not read from ring buffer\n",
 			       count - err);
 			err = -EFAULT;
 			goto out;
@@ -3074,9 +3074,8 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 	if (!aoc_online_state(dev))
 		memset(tmp, 0, count);
 
-	err = copy_to_user(dest, tmp, count);
-	if (err != 0) {
-		pr_err("ERR: %d bytes not copied to user space\n", err);
+	if (copy_to_iter(tmp, count, dest) != count) {
+		pr_err("ERR: incomplete copy of captured audio\n");
 		err = -EFAULT;
 	}
 
@@ -3084,18 +3083,18 @@ out:
 	return err < 0 ? err : 0;
 }
 
-int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
-		    uint32_t count)
+int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, struct iov_iter *src,
+		    size_t count)
 {
 	int err = 0;
 	struct aoc_service_dev *dev = alsa_stream->dev;
 	void *tmp;
 	int avail;
-	uint32_t block_size;
+	size_t block_size;
 
 	avail = aoc_ring_bytes_available_to_write(dev->service, AOC_DOWN);
 	if (unlikely(avail < count)) {
-		pr_err("ERR: inconsistent write/read pointers, avail = %d, towrite = %u\n",
+		pr_err("ERR: inconsistent write/read pointers, avail = %d, towrite = %zu\n",
 		       avail, count);
 		err = -EFAULT;
 		goto out;
@@ -3114,23 +3113,21 @@ int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 			block_size = count;
 
 		if (alsa_stream->cstream)
-			pr_debug("compr offload, count: %d, blocksize: %d\n", count, block_size);
+			pr_debug("compr offload, count: %zu, blocksize: %zu\n", count, block_size);
 
-		err = copy_from_user(tmp, src, block_size);
-		if (err != 0) {
-			pr_err("ERR: %d bytes not read from user space\n", err);
+		if (copy_from_iter(tmp, block_size, src) != block_size) {
+			pr_err("ERR: incomplete copy of playback audio\n");
 			err = -EFAULT;
 			goto out;
 		}
 
 		err = aoc_service_write(dev, tmp, block_size, NONBLOCKING);
 		if (err != block_size) {
-			pr_err("ERR: unwritten data - %d bytes\n", block_size - err);
+			pr_err("ERR: unwritten data - %zu bytes\n", block_size - err);
 			err = -EFAULT;
 		}
 
 		count -= block_size;
-		src += block_size;
 	}
 
 out:

@@ -11,6 +11,11 @@
 
 #include <linux/notifier.h>
 
+#include "../alsa/aoc_alsa_usb.h"
+
+/* Preserve the existing platform policy for AP suspend during USB offload. */
+#define AOC_USB_AP_SUSPEND_ENABLED 1
+
 #include "usbaudio.h"
 #include "xhci.h"
 
@@ -63,17 +68,13 @@ struct get_isoc_tr_info_args {
 int register_aoc_usb_notifier(struct notifier_block *nb);
 int unregister_aoc_usb_notifier(struct notifier_block *nb);
 
-extern bool aoc_alsa_usb_callback_register(void (*callback)(struct usb_device*,
-							    struct usb_host_endpoint*));
-extern bool aoc_alsa_usb_callback_unregister(void);
-
 int notify_offload_state(bool enabled);
 int xhci_set_dcbaa_ptr(u64 aoc_dcbaa_ptr);
 int xhci_setup_done(void);
 int xhci_sync_conn_stat(unsigned int bus_id, unsigned int dev_num, unsigned int slot_id,
 			       unsigned int conn_stat);
 int usb_host_mode_state_notify(enum aoc_usb_state usb_state);
-int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring);
+int xhci_set_isoc_tr_info(struct get_isoc_tr_info_args *tr_info);
 int xhci_get_usb_audio_count(void);
 
 int xhci_offload_helper_init(void);

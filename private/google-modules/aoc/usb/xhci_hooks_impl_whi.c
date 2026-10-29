@@ -16,8 +16,6 @@
 #include <linux/workqueue.h>
 #include <linux/usb/hcd.h>
 
-#include <trace/hooks/audio_usboffload.h>
-
 #include "aoc_usb.h"
 #include "xhci-exynos.h"
 #include "xhci_offload_impl.h"
@@ -110,30 +108,53 @@ static bool is_compatible_with_usb_audio_offload(struct usb_device *udev)
 static void setup_transfer_ring(struct usb_device *udev, struct usb_host_endpoint *ep)
 {
 	struct xhci_hcd *xhci = get_xhci_hcd_by_udev(udev);
+	struct get_isoc_tr_info_args tr_info = {};
 	struct xhci_virt_device *virt_dev;
-	unsigned int ep_index;
+	struct xhci_ring *ring;
+	unsigned int ep_index, free;
+	unsigned long flags;
 	u32 endpoint_type;
-	u16 dir;
+	bool new_ring;
 
 	ep_index = xhci_get_endpoint_index(&ep->desc);
 	endpoint_type = xhci_get_endpoint_type(ep);
-	dir = endpoint_type == ISOC_IN_EP ? 0 : 1;
+	tr_info.dir = endpoint_type == ISOC_IN_EP ? 0 : 1;
 
+	/*
+	 * The caller holds the USB sound chip mutex against endpoint reconfiguration
+	 * and the AoC USB mutex against disconnect. Take the controller lock only
+	 * for the cursor/segment snapshot; it does not itself pin ring lifetime.
+	 */
+	spin_lock_irqsave(&xhci->lock, flags);
 	virt_dev = xhci->devs[udev->slot_id];
 	if (!virt_dev) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
 		xhci_err(xhci, "%s: virt_dev not found!\n", __func__);
 		return;
 	}
 
-	if (virt_dev->eps[ep_index].new_ring) {
-		xhci_info(xhci, "%s: deliver transfer ring from new_ring\n", __func__);
-		xhci_set_isoc_tr_info(0, dir, virt_dev->eps[ep_index].new_ring);
-	} else if (virt_dev->eps[ep_index].ring) {
-		xhci_info(xhci, "%s: deliver transfer ring from ring\n", __func__);
-		xhci_set_isoc_tr_info(0, dir, virt_dev->eps[ep_index].ring);
-	} else {
+	new_ring = !!virt_dev->eps[ep_index].new_ring;
+	ring = new_ring ? virt_dev->eps[ep_index].new_ring : virt_dev->eps[ep_index].ring;
+	if (!ring) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
 		xhci_err(xhci, "%s: transfer ring not found!\n", __func__);
+		return;
 	}
+
+	tr_info.num_segs = ring->num_segs;
+	tr_info.max_packet = ring->bounce_buf_len;
+	tr_info.type = ring->type;
+	tr_info.seg_ptr = ring->first_seg->dma;
+	tr_info.cycle_state = ring->cycle_state;
+	free = xhci_num_trbs_free(ring);
+	/* Firmware's legacy count excludes one reserved normal TRB. */
+	tr_info.num_trbs_free = free ? free - 1 : 0;
+	spin_unlock_irqrestore(&xhci->lock, flags);
+
+	xhci_info(xhci, "%s: deliver transfer ring from %s\n", __func__,
+		  new_ring ? "new_ring" : "ring");
+	/* The notifier sends firmware IPC and may sleep; pass only the snapshot. */
+	xhci_set_isoc_tr_info(&tr_info);
 }
 
 static void offload_connect_work(struct work_struct *work)
@@ -145,22 +166,19 @@ static void offload_connect_work(struct work_struct *work)
 	notify_offload_state(offload_data->offload_state);
 }
 
-static void usb_audio_vendor_connect(void *unused, struct usb_interface *intf,
-				     struct snd_usb_audio *chip)
+static void usb_audio_vendor_connection(bool connected)
 {
-	if (offload_data) {
-		offload_data->offload_state = true;
-		schedule_work(&offload_data->offload_connect_ws);
-	}
+	offload_data->offload_state = connected;
+	schedule_work(&offload_data->offload_connect_ws);
 }
 
-static void usb_audio_vendor_disconnect(void *unused, struct usb_interface *intf)
-{
-	if (offload_data) {
-		offload_data->offload_state = false;
-		schedule_work(&offload_data->offload_connect_ws);
-	}
-}
+static const struct aoc_alsa_usb_ops aoc_usb_ops = {
+	.setup_transfer_ring = setup_transfer_ring,
+	.connection = usb_audio_vendor_connection,
+	.allow_runtime_suspend = AOC_USB_AP_SUSPEND_ENABLED,
+};
+
+static void usb_audio_offload_cleanup(struct xhci_hcd *xhci);
 
 static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 			    void *dev)
@@ -203,6 +221,9 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 	struct device_node	*np;
 	int i, count;
 #endif
+
+	if (offload_data)
+		return -EBUSY;
 
 	offload_data = kzalloc(sizeof(struct xhci_offload_data), GFP_KERNEL);
 	if (!offload_data)
@@ -248,7 +269,7 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 		}
 
 		ret = iommu_map(domain, rmem->base, rmem->base, rmem->size,
-				IOMMU_READ | IOMMU_WRITE);
+				IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 		if (ret < 0) {
 			dev_err(dev, "iommu_map error: %d\n", ret);
 			goto unmap_iommu;
@@ -263,6 +284,7 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 	if (ret) {
 		dev_err(dev, "Could not get reserved memory\n");
 		kfree(offload_data);
+		offload_data = NULL;
 		return ret;
 	}
 
@@ -278,11 +300,14 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 	/* Notification for xhci driver probing */
 	usb_host_mode_state_notify(USB_CONNECTED);
 
-	aoc_alsa_usb_callback_register(setup_transfer_ring);
-	usb_register_notify(&xhci_udev_nb);
 	offload_data->xhci = xhci;
-
 	INIT_WORK(&offload_data->offload_connect_ws, offload_connect_work);
+	usb_register_notify(&xhci_udev_nb);
+	ret = aoc_alsa_usb_callback_register(&aoc_usb_ops);
+	if (ret) {
+		usb_audio_offload_cleanup(xhci);
+		return ret;
+	}
 
 	return 0;
 #if IS_ENABLED(CONFIG_USB_XHCI_GOOG_DMA)
@@ -306,6 +331,7 @@ release_rmem:
 
 free_data:
 	kfree(offload_data);
+	offload_data = NULL;
 
 	return ret;
 #endif
@@ -331,17 +357,17 @@ static void usb_audio_offload_cleanup(struct xhci_hcd *xhci)
 	int i, count, ret;
 #endif
 
-	offload_data->usb_audio_offload = false;
-	offload_data->offload_state = false;
-	offload_data->xhci = NULL;
-
-	aoc_alsa_usb_callback_unregister();
+	/* Drain endpoint/connection callbacks before changing their state. */
+	aoc_alsa_usb_callback_unregister(&aoc_usb_ops);
 	usb_unregister_notify(&xhci_udev_nb);
 
 	/* Notification for xhci driver removing */
 	usb_host_mode_state_notify(USB_DISCONNECTED);
 
 	cancel_work_sync(&offload_data->offload_connect_ws);
+	offload_data->usb_audio_offload = false;
+	offload_data->offload_state = false;
+	offload_data->xhci = NULL;
 
 #if IS_ENABLED(CONFIG_USB_XHCI_GOOG_DMA)
 	xhci_goog_restore_dma_ops(dev);
@@ -387,16 +413,5 @@ static struct xhci_exynos_ops offload_ops = {
 
 int xhci_offload_helper_init(void)
 {
-	int ret;
-
-	ret = register_trace_android_vh_audio_usb_offload_connect(usb_audio_vendor_connect, NULL);
-	if (ret)
-		pr_err("register_trace_android_vh_audio_usb_offload_connect failed: %d\n", ret);
-
-	ret = register_trace_android_rvh_audio_usb_offload_disconnect(usb_audio_vendor_disconnect,
-								      NULL);
-	if (ret)
-		pr_err("register_trace_android_rvh_audio_usb_offload_disconnect failed: %d\n", ret);
-
 	return xhci_exynos_register_offload_ops(&offload_ops);
 }
