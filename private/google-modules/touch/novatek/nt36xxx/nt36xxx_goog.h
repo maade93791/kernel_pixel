@@ -20,6 +20,9 @@
 static u8 tid_nt36523n[NVT_ID_BYTE_MAX] = {0x17, 0xFF, 0xFF, 0x23, 0x65, 0x03};
 struct nvt_ts_data; /* forward declaration */
 
+void nvt_heatmap_decode(const uint8_t *in, const uint32_t in_sz,
+		       const uint8_t *out, const uint32_t out_sz);
+
 #if defined(CONFIG_SOC_GOOGLE)
 bool nvt_ts_check_tid(struct nvt_ts_data *ts, u8 *tid);
 #endif

@@ -24,6 +24,7 @@
 #include <linux/proc_fs.h>
 #include <linux/input/mt.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/of_irq.h>
 #include <linux/power_supply.h>
 
@@ -67,21 +68,10 @@ uint8_t esd_check;
 uint8_t esd_retry;
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
-#if NVT_TOUCH_EXT_PROC
-extern int32_t nvt_extra_proc_init(void);
-extern void nvt_extra_proc_deinit(void);
-#endif
-
-#if NVT_TOUCH_MP
-extern int32_t nvt_mp_proc_init(void);
-extern void nvt_mp_proc_deinit(void);
-#endif
-
 struct nvt_ts_data *ts;
 
 #if BOOT_UPDATE_FIRMWARE
 struct workqueue_struct *nvt_fwu_wq;
-extern void Boot_Update_Firmware(struct work_struct *work);
 #endif
 
 #if defined(CONFIG_FB)
@@ -1025,7 +1015,7 @@ Description:
 return:
 	n.a.
 *******************************************************/
-void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
+static void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
 {
 	unsigned int keycode = 0;
 	uint8_t func_type = data[2];
@@ -1069,12 +1059,14 @@ static int32_t nvt_parse_dt(struct device *dev)
 	u16 values[2];
 
 #if NVT_TOUCH_SUPPORT_HW_RST
-	ts->reset_gpio = of_get_named_gpio_flags(np, "novatek,reset-gpio", 0,
-			 &ts->reset_flags);
+	ts->reset_gpio = of_get_named_gpio(np, "novatek,reset-gpio", 0);
+	if (ts->reset_gpio < 0 && of_find_property(np, "novatek,reset-gpio", NULL))
+		return ts->reset_gpio;
 	NVT_LOG("novatek,reset-gpio=%d\n", ts->reset_gpio);
 #endif
-	ts->irq_gpio = of_get_named_gpio_flags(np, "novatek,irq-gpio", 0,
-					       &ts->irq_flags);
+	ts->irq_gpio = of_get_named_gpio(np, "novatek,irq-gpio", 0);
+	if (ts->irq_gpio < 0)
+		return ts->irq_gpio;
 	NVT_LOG("novatek,irq-gpio=%d\n", ts->irq_gpio);
 
 	ts->pen_support = of_property_read_bool(np, "novatek,pen-support");
@@ -2197,7 +2189,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 
 	//---prepare for spi parameter---
-	if (ts->client->master->flags & SPI_MASTER_HALF_DUPLEX) {
+	if (ts->client->controller->flags & SPI_CONTROLLER_HALF_DUPLEX) {
 		NVT_ERR("Full duplex not supported by master\n");
 		ret = -EIO;
 		goto err_ckeck_full_duplex;
@@ -2488,6 +2480,10 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	//---set int-pin & request irq---
 	client->irq = gpio_to_irq(ts->irq_gpio);
+	if (client->irq <= 0) {
+		ret = client->irq ? client->irq : -EINVAL;
+		goto err_int_request_failed;
+	}
 	if (client->irq) {
 		NVT_LOG("int_trigger_type=%d\n", ts->int_trigger_type);
 		ts->irq_enabled = true;
@@ -2658,6 +2654,7 @@ err_goog_touch_interface:
 	ts->g_usi_handle = G_USI_INVALID_HANDLE;
 err_goog_usi_register_failed:
 	input_unregister_device(ts->input_dev);
+	ts->input_dev = NULL;
 err_input_register_device_failed:
 	if (ts->input_dev) {
 		input_free_device(ts->input_dev);

@@ -661,4 +661,15 @@ void fts_test_save_data(char *name, int code, int *data, int datacnt,
     } \
     printk(KERN_ERR "[FTS_TS/E][TEST]%s:"fmt"\n", __func__, ##args);\
 } while (0)
+
+/* Measurement interfaces shared by the controller and factory-test code. */
+int fts_test_get_raw(int *raw, u8 tx, u8 rx);
+int fts_test_get_baseline(int *raw, int *base_raw, u8 tx, u8 rx);
+int fts_test_get_strength(u8 *base_raw, u16 base_raw_size);
+int fts_test_get_uniformity_data(int *rawdata_linearity, u8 tx, u8 rx);
+int fts_test_get_scap_raw(int *scap_raw, u8 tx, u8 rx, int *fwcheck);
+int fts_test_get_scap_cb(int *scap_cb, u8 tx, u8 rx, int *fwcheck);
+int fts_test_get_short(int *short_data, u8 tx, u8 rx);
+int fts_test_get_noise(int *noise, u8 tx, u8 rx);
+int fts_test_get_panel_differ(int *panel_differ, u8 tx, u8 rx);
 #endif

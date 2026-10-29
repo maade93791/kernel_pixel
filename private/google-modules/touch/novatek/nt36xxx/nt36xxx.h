@@ -518,6 +518,19 @@ extern int32_t nvt_update_firmware(const char *firmware_name, uint8_t full);
 extern void nvt_change_mode(uint8_t mode);
 extern void nvt_get_xdata_info(int32_t **ptr, int *size);
 extern void nvt_read_mdata(uint32_t xdata_addr, uint32_t xdata_btn_addr);
+void nvt_get_mdata(int32_t *buf, uint8_t *m_x_num, uint8_t *m_y_num);
+void nvt_read_get_num_mdata(uint32_t xdata_addr, int32_t *buffer, uint32_t num);
+#if NVT_TOUCH_EXT_PROC
+int32_t nvt_extra_proc_init(void);
+void nvt_extra_proc_deinit(void);
+#endif
+#if NVT_TOUCH_MP
+int32_t nvt_mp_proc_init(void);
+void nvt_mp_proc_deinit(void);
+#endif
+#if BOOT_UPDATE_FIRMWARE
+void Boot_Update_Firmware(struct work_struct *work);
+#endif
 extern int8_t nvt_switch_FreqHopEnDis(uint8_t FreqHopEnDis);
 extern uint8_t nvt_get_fw_pipe(void);
 extern void nvt_read_fw_history(uint32_t addr);

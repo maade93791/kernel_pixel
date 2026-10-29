@@ -36,6 +36,8 @@
  * Synaptics TouchCom device using I2C
  */
 
+#include <linux/gpio/driver.h>
+#include <linux/of_gpio.h>
 #include <linux/spi/spi.h>
 #include <drm/drm_panel.h>
 
@@ -49,6 +51,8 @@ static unsigned char *buf;
 static unsigned int buf_size;
 
 static struct spi_transfer *xfer;
+
+static unsigned int xfer_count;
 
 static struct platform_device *syna_spi_device;
 
@@ -116,6 +120,7 @@ static void syna_spi_hw_reset(struct syna_hw_interface *hw_if)
 static int syna_spi_request_gpio(int gpio, bool config, int dir,
 		int state, char *label)
 {
+	unsigned long flags;
 	int retval;
 #ifdef DEV_MANAGED_API
 	struct device *dev = syna_request_managed_device();
@@ -132,25 +137,18 @@ static int syna_spi_request_gpio(int gpio, bool config, int dir,
 			LOGE("Fail to set GPIO label\n");
 			return retval;
 		}
+		flags = dir == 0 ? GPIOF_IN :
+			(state ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW);
 #ifdef DEV_MANAGED_API
-		retval = devm_gpio_request(dev, gpio, label);
+		retval = devm_gpio_request_one(dev, gpio, flags, label);
 #else /* Legacy API */
-		retval = gpio_request(gpio, label);
+		retval = gpio_request_one(gpio, flags, label);
 #endif
 		if (retval < 0) {
 			LOGE("Fail to request GPIO %d\n", gpio);
 			return retval;
 		}
 
-		if (dir == 0)
-			retval = gpio_direction_input(gpio);
-		else
-			retval = gpio_direction_output(gpio, state);
-
-		if (retval < 0) {
-			LOGE("Fail to set GPIO %d direction\n", gpio);
-			return retval;
-		}
 	} else {
 #ifndef DEV_MANAGED_API
 		gpio_free(gpio);
@@ -328,6 +326,7 @@ static int syna_spi_get_regulator(struct syna_hw_interface *hw_if,
 		if (IS_ERR((struct regulator *)pwr->vdd_reg_dev)) {
 			LOGW("Vdd regulator is not ready\n");
 			retval = PTR_ERR((struct regulator *)pwr->vdd_reg_dev);
+			pwr->vdd_reg_dev = NULL;
 			goto exit;
 		}
 	}
@@ -341,7 +340,8 @@ static int syna_spi_get_regulator(struct syna_hw_interface *hw_if,
 		if (IS_ERR((struct regulator *)pwr->avdd_reg_dev)) {
 			LOGW("AVdd regulator is not ready\n");
 			retval = PTR_ERR((struct regulator *)pwr->avdd_reg_dev);
-			goto regulator_vdd_put;
+			pwr->avdd_reg_dev = NULL;
+			goto regulator_put;
 		}
 	}
 
@@ -356,7 +356,6 @@ regulator_put:
 #endif
 		pwr->vdd_reg_dev = NULL;
 	}
-regulator_vdd_put:
 	if (pwr->avdd_reg_dev) {
 #ifdef DEV_MANAGED_API
 		devm_regulator_put(pwr->avdd_reg_dev);
@@ -440,6 +439,72 @@ exit:
  *    on success, 0; otherwise, negative value on error.
  */
 #ifdef CONFIG_OF
+#if IS_ENABLED(CONFIG_OF_GPIO)
+struct syna_spi_irq_gpio_lookup {
+	struct of_phandle_args spec;
+	int gpio;
+	u32 flags;
+};
+
+static int syna_spi_irq_gpio_match(struct gpio_chip *chip, const void *data)
+{
+	struct syna_spi_irq_gpio_lookup *lookup = (struct syna_spi_irq_gpio_lookup *)data;
+	u32 flags = 0;
+	int offset;
+
+	if (!device_match_of_node(gpio_device_to_device(chip->gpiodev), lookup->spec.np) ||
+	    !chip->of_xlate || chip->of_xlate(chip, &lookup->spec, NULL) < 0)
+		return 0;
+
+	if (chip->of_gpio_n_cells != lookup->spec.args_count) {
+		lookup->gpio = -EINVAL;
+		return 1;
+	}
+
+	offset = chip->of_xlate(chip, &lookup->spec, &flags);
+	if (offset < 0)
+		lookup->gpio = offset;
+	else if (offset >= chip->ngpio)
+		lookup->gpio = -EINVAL;
+	else {
+		lookup->gpio = gpio_device_get_base(chip->gpiodev) + offset;
+		lookup->flags = flags;
+	}
+
+	return 1;
+}
+#endif
+
+static int syna_spi_get_irq_gpio(const struct device_node *np, unsigned long *irq_flags)
+{
+#if IS_ENABLED(CONFIG_OF_GPIO)
+	struct syna_spi_irq_gpio_lookup lookup = { .gpio = -EPROBE_DEFER };
+	struct gpio_device *gdev;
+	int ret;
+
+	ret = of_parse_phandle_with_args_map(np, "synaptics,irq-gpio", "gpio", 0,
+					     &lookup.spec);
+	if (ret)
+		return ret;
+
+	/* Translate while gpio_device_find() protects the provider's lifetime. */
+	gdev = gpio_device_find(&lookup, syna_spi_irq_gpio_match);
+	if (gdev)
+		gpio_device_put(gdev);
+	of_node_put(lookup.spec.np);
+
+	/* This legacy binding carries IRQF_* bits, including 0x2008 on Cheetah. */
+	if (lookup.gpio >= 0)
+		*irq_flags = lookup.flags;
+
+	return lookup.gpio;
+#else
+	*irq_flags = 0;
+	return of_get_named_gpio(np, "synaptics,irq-gpio", 0);
+#endif
+}
+
+
 static int syna_spi_parse_dt(struct syna_hw_interface *hw_if,
 		struct device *dev)
 {
@@ -490,9 +555,9 @@ static int syna_spi_parse_dt(struct syna_hw_interface *hw_if,
 
 	prop = of_find_property(np, "synaptics,irq-gpio", NULL);
 	if (prop && prop->length) {
-		attn->irq_gpio = of_get_named_gpio_flags(np,
-				"synaptics,irq-gpio", 0,
-				(enum of_gpio_flags *)&attn->irq_flags);
+		attn->irq_gpio = syna_spi_get_irq_gpio(np, &attn->irq_flags);
+		if (attn->irq_gpio < 0)
+			return attn->irq_gpio;
 	} else {
 		attn->irq_gpio = -1;
 	}
@@ -517,16 +582,20 @@ static int syna_spi_parse_dt(struct syna_hw_interface *hw_if,
 
 	prop = of_find_property(np, "synaptics,vdd-gpio", NULL);
 	if (prop && prop->length) {
-		pwr->vdd_gpio = of_get_named_gpio_flags(np,
-				"synaptics,vdd-gpio", 0, NULL);
+		pwr->vdd_gpio = of_get_named_gpio(np,
+				"synaptics,vdd-gpio", 0);
+		if (pwr->vdd_gpio < 0)
+			return pwr->vdd_gpio;
 	} else {
 		pwr->vdd_gpio = -1;
 	}
 
 	prop = of_find_property(np, "synaptics,avdd-gpio", NULL);
 	if (prop && prop->length) {
-		pwr->avdd_gpio = of_get_named_gpio_flags(np,
-				"synaptics,avdd-gpio", 0, NULL);
+		pwr->avdd_gpio = of_get_named_gpio(np,
+				"synaptics,avdd-gpio", 0);
+		if (pwr->avdd_gpio < 0)
+			return pwr->avdd_gpio;
 	} else {
 		pwr->avdd_gpio = -1;
 	}
@@ -563,8 +632,10 @@ static int syna_spi_parse_dt(struct syna_hw_interface *hw_if,
 
 	prop = of_find_property(np, "synaptics,reset-gpio", NULL);
 	if (prop && prop->length) {
-		rst->reset_gpio = of_get_named_gpio_flags(np,
-				"synaptics,reset-gpio", 0, NULL);
+		rst->reset_gpio = of_get_named_gpio(np,
+				"synaptics,reset-gpio", 0);
+		if (rst->reset_gpio < 0)
+			return rst->reset_gpio;
 	} else {
 		rst->reset_gpio = -1;
 	}
@@ -772,7 +843,6 @@ static int syna_spi_parse_dt(struct syna_hw_interface *hw_if,
  */
 static int syna_spi_alloc_mem(unsigned int count, unsigned int size)
 {
-	static unsigned int xfer_count;
 
 	if (count > xfer_count) {
 		syna_pal_mem_free((void *)xfer);
@@ -1011,7 +1081,7 @@ static int syna_spi_probe(struct spi_device *spi)
 	struct syna_hw_attn_data *attn = &syna_spi_hw_if.bdata_attn;
 	struct syna_hw_bus_data *bus = &syna_spi_hw_if.bdata_io;
 
-	if (spi->master->flags & SPI_MASTER_HALF_DUPLEX) {
+	if (spi->controller->flags & SPI_CONTROLLER_HALF_DUPLEX) {
 		LOGE("Full duplex not supported by host\n");
 		return -EIO;
 	}
@@ -1024,7 +1094,9 @@ static int syna_spi_probe(struct spi_device *spi)
 	}
 
 #ifdef CONFIG_OF
-	syna_spi_parse_dt(&syna_spi_hw_if, &spi->dev);
+	retval = syna_spi_parse_dt(&syna_spi_hw_if, &spi->dev);
+	if (retval < 0)
+		goto put_platform_device;
 #endif
 
 	syna_pal_mutex_alloc(&attn->irq_en_mutex);
@@ -1058,29 +1130,50 @@ static int syna_spi_probe(struct spi_device *spi)
 	retval = spi_setup(spi);
 	if (retval < 0) {
 		LOGE("Fail to set up SPI protocol driver\n");
-		return retval;
+		goto free_mutexes;
 	}
 
 	/* enable the regulators */
 	retval = syna_spi_get_regulator(&syna_spi_hw_if, true);
 	if (retval < 0)
-		return retval;
+		goto free_mutexes;
 
 	/* initialize the gpio pins */
 	retval = syna_spi_config_gpio(&syna_spi_hw_if);
 	if (retval < 0) {
 		LOGE("Fail to config gpio\n");
-		return retval;
+		goto put_regulators;
 	}
 
 	/* register the spi platform device */
 	retval = platform_device_add(syna_spi_device);
 	if (retval < 0) {
 		LOGE("Fail to add platform device\n");
-		return retval;
+		goto free_gpios;
 	}
 
 	return 0;
+
+free_gpios:
+	if (syna_spi_hw_if.bdata_pwr.avdd_gpio >= 0)
+		syna_spi_request_gpio(syna_spi_hw_if.bdata_pwr.avdd_gpio, false, 0, 0, NULL);
+	if (syna_spi_hw_if.bdata_pwr.vdd_gpio >= 0)
+		syna_spi_request_gpio(syna_spi_hw_if.bdata_pwr.vdd_gpio, false, 0, 0, NULL);
+	if (syna_spi_hw_if.bdata_rst.reset_gpio >= 0)
+		syna_spi_request_gpio(syna_spi_hw_if.bdata_rst.reset_gpio, false, 0, 0, NULL);
+	if (attn->irq_gpio >= 0)
+		syna_spi_request_gpio(attn->irq_gpio, false, 0, 0, NULL);
+put_regulators:
+	syna_spi_get_regulator(&syna_spi_hw_if, false);
+free_mutexes:
+	syna_pal_mutex_free(&bus->io_mutex);
+	syna_pal_mutex_free(&attn->irq_en_mutex);
+put_platform_device:
+	syna_spi_device->dev.platform_data = NULL;
+	platform_device_put(syna_spi_device);
+	syna_spi_device = NULL;
+	syna_spi_hw_if.pdev = NULL;
+	return retval;
 }
 
 /**
@@ -1098,6 +1191,9 @@ static void syna_spi_remove(struct spi_device *spi)
 	struct syna_hw_rst_data *rst = &syna_spi_hw_if.bdata_rst;
 	struct syna_hw_bus_data *bus = &syna_spi_hw_if.bdata_io;
 
+	/* Stop the child while its hardware providers and transfer buffers live. */
+	platform_device_del(syna_spi_device);
+
 	/* disable gpios */
 	if (pwr->avdd_gpio >= 0)
 		syna_spi_request_gpio(pwr->avdd_gpio, false, 0, 0, NULL);
@@ -1114,9 +1210,18 @@ static void syna_spi_remove(struct spi_device *spi)
 	syna_pal_mutex_free(&attn->irq_en_mutex);
 	syna_pal_mutex_free(&bus->io_mutex);
 
-	/* remove the platform device */
+	/* The child is stopped; retire its parent-owned transfer storage. */
+	syna_pal_mem_free((void *)buf);
+	buf = NULL;
+	buf_size = 0;
+	syna_pal_mem_free((void *)xfer);
+	xfer = NULL;
+	xfer_count = 0;
+
 	syna_spi_device->dev.platform_data = NULL;
-	platform_device_unregister(syna_spi_device);
+	platform_device_put(syna_spi_device);
+	syna_spi_device = NULL;
+	syna_spi_hw_if.pdev = NULL;
 }
 
 /**
@@ -1182,10 +1287,6 @@ int syna_hw_interface_init(void)
  */
 void syna_hw_interface_exit(void)
 {
-	syna_pal_mem_free((void *)buf);
-
-	syna_pal_mem_free((void *)xfer);
-
 	spi_unregister_driver(&syna_spi_driver);
 }
 
