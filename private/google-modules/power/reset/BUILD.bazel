@@ -17,7 +17,6 @@ kernel_module(
     name = "reset",
     srcs = glob([
         "**/*.c",
-        "**/*.h",
     ]) + [
         "Kbuild",
         "//private/google-modules/bms:headers",
