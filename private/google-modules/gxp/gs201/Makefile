@@ -157,9 +157,9 @@ EXTRA_SYMBOLS += $(GMODULE_OUT_PATH)/perf/google_pm_qos_Module.symvers
 endif
 
 modules modules_install compile_commands.json:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) gcip.o
+	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) $(if $(MO),MO=$(MO)/$(GCIP_DIR)) gcip.o
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) \
 	EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" $(@)
 clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) $(@)
+	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) $(if $(MO),MO=$(MO)/$(GCIP_DIR)) $(@)
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) $(@)

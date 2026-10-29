@@ -6,6 +6,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/err.h>
 #include <linux/idr.h>
 #include <linux/iommu.h>
 #include <linux/vmalloc.h>
@@ -21,6 +22,7 @@ int gcip_domain_pool_init(struct device *dev, struct gcip_domain_pool *pool, uns
 {
 	unsigned int i;
 	struct iommu_domain *domain;
+	int ret;
 
 	pool->size = size;
 	pool->dev = dev;
@@ -39,12 +41,13 @@ int gcip_domain_pool_init(struct device *dev, struct gcip_domain_pool *pool, uns
 		return -ENOMEM;
 	}
 	for (i = 0; i < size; i++) {
-		domain = iommu_domain_alloc(dev->bus);
-		if (!domain) {
+		domain = iommu_paging_domain_alloc_flags(dev, IOMMU_HWPT_ALLOC_PASID);
+		if (IS_ERR(domain)) {
 			dev_err(pool->dev, "Failed to allocate iommu domain %d of %u\n", i + 1,
 				size);
+			ret = PTR_ERR(domain);
 			gcip_domain_pool_destroy(pool);
-			return -ENOMEM;
+			return ret;
 		}
 
 		pool->array[i] = domain;
@@ -62,8 +65,9 @@ struct iommu_domain *gcip_domain_pool_alloc(struct gcip_domain_pool *pool)
 		if (!ddomain)
 			return NULL;
 
-		ddomain->domain = iommu_domain_alloc(pool->dev->bus);
-		if (!ddomain->domain) {
+		ddomain->domain = iommu_paging_domain_alloc_flags(pool->dev,
+							    IOMMU_HWPT_ALLOC_PASID);
+		if (IS_ERR(ddomain->domain)) {
 			vfree(ddomain);
 			return NULL;
 		}
@@ -144,4 +148,6 @@ void gcip_domain_pool_destroy(struct gcip_domain_pool *pool)
 
 	ida_destroy(&pool->idp);
 	vfree(pool->array);
+	pool->array = NULL;
+	pool->size = 0;
 }

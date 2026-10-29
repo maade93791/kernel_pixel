@@ -149,7 +149,7 @@ MODULE_DEVICE_TABLE(of, gxp_of_match);
 
 static struct platform_driver gxp_platform_driver = {
 	.probe = gxp_platform_probe,
-	.remove_new = gxp_common_platform_remove,
+	.remove = gxp_common_platform_remove,
 	.driver = {
 			.name = GXP_DRIVER_NAME,
 			.of_match_table = of_match_ptr(gxp_of_match),
@@ -177,7 +177,7 @@ static void __exit gxp_platform_exit(void)
 }
 
 MODULE_DESCRIPTION("Google GXP platform driver");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 MODULE_LICENSE("GPL");
 #ifdef GIT_REPO_TAG
 MODULE_INFO(gitinfo, GIT_REPO_TAG);

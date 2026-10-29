@@ -341,36 +341,7 @@ static int gxp_add_seg(struct gxp_debug_dump_manager *mgr, uint core_id, uint *s
 	return 0;
 }
 
-#if HAS_COREDUMP
-static void gxp_send_to_sscd(struct gxp_dev *gxp, void *segs, int seg_cnt, const char *info)
-{
-	int ret;
-	ktime_t now;
-	uint64_t diff_ms;
-	static ktime_t prev_sscd_report_time;
-	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
-	struct sscd_platform_data *pdata = mgr->sscd_pdata;
 
-	if (!pdata || !pdata->sscd_report) {
-		dev_warn(gxp->dev, "Failed to generate coredump\n");
-		return;
-	}
-
-	now = ktime_get();
-	diff_ms = ktime_to_ms(ktime_sub(now, prev_sscd_report_time));
-	if (diff_ms < SSCD_REPORT_WAIT_TIME)
-		msleep(SSCD_REPORT_WAIT_TIME - diff_ms);
-
-	ret = pdata->sscd_report(gxp->debug_dump_mgr->sscd_dev, segs, seg_cnt,
-				 SSCD_FLAGS_ELFARM64HDR, info);
-	if (ret) {
-		dev_warn(gxp->dev, "Unable to send the report to SSCD daemon (ret=%d)\n", ret);
-		return;
-	}
-
-	prev_sscd_report_time = ktime_get();
-}
-#endif /* HAS_COREDUMP */
 
 /*
  * `user_bufs` is an input buffer containing up to GXP_NUM_BUFFER_MAPPINGS
@@ -934,7 +905,7 @@ static int gxp_handle_debug_dump(struct gxp_dev *gxp, struct gxp_virtual_device 
 		 core_cfg->crash_epc1);
 
 #if HAS_COREDUMP
-	gxp_send_to_sscd(gxp, mgr->segs[core_id], seg_idx, sscd_msg);
+	gxp_sscd_report(gxp, mgr->segs[core_id], seg_idx, sscd_msg);
 #endif /* HAS_COREDUMP */
 
 	gxp_user_buffers_vunmap(gxp, vd, core_header);
@@ -1075,7 +1046,8 @@ struct work_struct *gxp_debug_dump_get_notification_handler(struct gxp_dev *gxp,
 {
 	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
 
-	if (!gxp_debug_dump_is_enabled())
+	if (!gxp_debug_dump_is_enabled() || !mgr || mgr->stopping ||
+	    core >= GXP_NUM_CORES)
 		return NULL;
 
 	if (!mgr->core_buf.vaddr) {
@@ -1136,7 +1108,7 @@ static int gxp_debug_dump_init_core_dump(struct gxp_dev *gxp)
 	return 0;
 }
 
-int gxp_debug_dump_init(struct gxp_dev *gxp, void *sscd_dev, void *sscd_pdata)
+int gxp_debug_dump_init(struct gxp_dev *gxp)
 {
 	struct gxp_debug_dump_manager *mgr;
 	int ret;
@@ -1172,8 +1144,6 @@ int gxp_debug_dump_init(struct gxp_dev *gxp, void *sscd_dev, void *sscd_pdata)
 
 	/* No need for a DMA handle since the carveout is coherent */
 	mgr->debug_dump_dma_handle = 0;
-	mgr->sscd_dev = sscd_dev;
-	mgr->sscd_pdata = sscd_pdata;
 	mutex_init(&mgr->debug_dump_lock);
 
 	debugfs_create_file(DEBUGFS_COREDUMP, 0200, gxp->d_entry, gxp, &debugfs_coredump_fops);
@@ -1194,6 +1164,31 @@ static void gxp_debug_dump_core_dump_exit(struct gxp_dev *gxp)
 	gxp_dma_free_coherent_buf(gxp, NULL, &mgr->core_buf);
 }
 
+void gxp_debug_dump_quiesce(struct gxp_dev *gxp)
+{
+	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
+	uint core;
+
+	if (!mgr)
+		return;
+
+	debugfs_lookup_and_remove(DEBUGFS_COREDUMP, gxp->d_entry);
+
+	/* Firmware startup and mailbox replacement hold the same write lock. */
+	down_write(&gxp->vd_semaphore);
+	mgr->stopping = true;
+	for (core = 0; core < GXP_NUM_CORES; core++)
+		gxp_notification_unregister_handler(gxp, core, HOST_NOTIF_DEBUG_DUMP_READY);
+	up_write(&gxp->vd_semaphore);
+
+	/*
+	 * Keep queued reports and join outside the VD/debug locks needed by
+	 * these workers. No withdrawn IRQ handler can enqueue another work.
+	 */
+	for (core = 0; core < GXP_NUM_CORES; core++)
+		flush_work(&mgr->debug_dump_works[core].work);
+}
+
 void gxp_debug_dump_exit(struct gxp_dev *gxp)
 {
 	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
@@ -1203,7 +1198,7 @@ void gxp_debug_dump_exit(struct gxp_dev *gxp)
 		return;
 	}
 
-	debugfs_remove(debugfs_lookup(DEBUGFS_COREDUMP, gxp->d_entry));
+	gxp_debug_dump_quiesce(gxp);
 	mutex_destroy(&mgr->debug_dump_lock);
 
 #if GXP_HAS_MCU
@@ -1314,7 +1309,7 @@ void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp)
 	}
 
 #if HAS_COREDUMP
-	gxp_send_to_sscd(gxp, mgr->segs[GXP_REG_MCU_ID], seg_idx, sscd_msg);
+	gxp_sscd_report(gxp, mgr->segs[GXP_REG_MCU_ID], seg_idx, sscd_msg);
 #endif /* HAS_COREDUMP */
 
 	mutex_unlock(&mgr->debug_dump_lock);
