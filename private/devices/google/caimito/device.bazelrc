@@ -4,4 +4,4 @@
 
 build:caimito --config=zumapro_base
 build:caimito --//private/devices/google/common:kernel=//private/devices/google/caimito:caimito/kernel
-build:caimito --//private/google-modules/touch/common:touch_udfps_notification=enabled
+build:caimito --//private/google-modules/touch/common/v1:touch_udfps_notification=enabled

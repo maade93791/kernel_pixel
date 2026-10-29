@@ -13,8 +13,8 @@ kernel_module(
         "configs/default_defconfig",
         "headers",
         "//private/google-modules/soc/gs:gs_soc_headers",
-        "//private/google-modules/wlan/wcn6740/cnss2:cnss2_headers",
-        "//private/google-modules/wlan/wcn6740/wlan/fw-api",
+        "//private/google-modules/wlan/qcom/wcn6740/cnss2:cnss2_headers",
+        "//private/google-modules/wlan/qcom/wcn6740/wlan/fw-api",
     ],
     outs = [
         "wlan.ko",
@@ -26,14 +26,14 @@ kernel_module(
     ],
     deps = [
         "//private/google-modules/soc/gs:gs_soc_module",
-        "//private/google-modules/wlan/wcn6740/cnss2",
+        "//private/google-modules/wlan/qcom/wcn6740/cnss2",
     ],
 )
 
 ddk_headers(
     name = "headers",
     hdrs = [
-        "//private/google-modules/wlan/wcn6740/wlan/qcacld-3.0/cmn:qcacmn",
+        "//private/google-modules/wlan/qcom/wcn6740/wlan/qcacld-3.0/cmn:qcacmn",
     ],
     includes = [],
     visibility = ["//visibility:private"],

@@ -11,8 +11,8 @@ KBUILD_OPTIONS	+= CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI=m
 EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE
 EXTRA_CFLAGS	+= -DNVT_TS_PANEL_BRIDGE
 
-EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/Module.symvers
-EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/usi/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/v1/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/v1/usi/Module.symvers
 
 include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 

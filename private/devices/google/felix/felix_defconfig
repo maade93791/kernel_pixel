@@ -12,7 +12,7 @@ CONFIG_LINK_DEVICE_PCIE_IOMMU=y
 CONFIG_CH_EXTENSION=m
 CONFIG_CP_THERMAL=m
 
-# private/google-modules/touch/common/Kconfig
+# private/google-modules/touch/common/v1/Kconfig
 CONFIG_TOUCHSCREEN_HEATMAP=m
 CONFIG_TOUCHSCREEN_TBN=m
 CONFIG_TOUCHSCREEN_OFFLOAD=m

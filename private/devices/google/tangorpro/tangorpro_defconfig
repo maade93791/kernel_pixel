@@ -5,7 +5,7 @@ CONFIG_REGULATOR_TPS65132=m
 CONFIG_BACKLIGHT_LP855X=m
 CONFIG_LEDS_PWM=m
 
-# private/google-modules/touch/common/Kconfig
+# private/google-modules/touch/common/v1/Kconfig
 CONFIG_TOUCHSCREEN_HEATMAP=m
 CONFIG_TOUCHSCREEN_TBN=m
 CONFIG_TOUCHSCREEN_OFFLOAD=m

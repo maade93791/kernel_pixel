@@ -23,7 +23,7 @@ filegroup(
     visibility = [
         "//private/devices/google:__subpackages__",
         "//private/google-modules/soc/gs:__pkg__",
-        "//private/google-modules/wlan/bcm4398:__pkg__",
+        "//private/google-modules/wlan/bcmdhd/bcm4398:__pkg__",
     ],
 )
 

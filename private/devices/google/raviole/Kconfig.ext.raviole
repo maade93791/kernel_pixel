@@ -2,7 +2,7 @@
 
 source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/radio/samsung/s5300/Kconfig"
 
-source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/touch/common/Kconfig"
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/touch/common/v1/Kconfig"
 
 source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/touch/fts/ftm5_legacy/Kconfig"
 
