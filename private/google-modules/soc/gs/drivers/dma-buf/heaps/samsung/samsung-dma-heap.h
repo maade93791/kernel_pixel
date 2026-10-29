@@ -22,8 +22,7 @@
 #include <linux/iommu.h>
 #include <linux/device.h>
 
-/* This header is in ACK under drivers/dma-buf/heaps. */
-#include <heaps/deferred-free-helper.h>
+#include "../deferred-free-helper.h"
 
 /* the number of pages that allocated from heaps and currently used */
 static atomic64_t inuse_pages = ATOMIC_INIT(0);
@@ -85,6 +84,10 @@ int samsung_heap_add(struct device *dev, void *priv,
 		     const struct dma_heap_ops *ops);
 struct dma_buf *samsung_export_dmabuf(struct samsung_dma_buffer *buffer, unsigned long fd_flags);
 void samsung_track_buffer_destroyed(struct samsung_dma_buffer *buffer);
+int trusty_dma_buf_get_shared_mem_id(struct dma_buf *dma_buf, trusty_shared_mem_id_t *id);
+#if IS_ENABLED(CONFIG_TRUSTY_DMA_BUF_FFA_TAG)
+u64 trusty_dma_buf_get_ffa_tag(struct dma_buf *dma_buf);
+#endif
 
 #define DMA_HEAP_VIDEO_PADDING (512)
 #define dma_heap_add_video_padding(len) (PAGE_ALIGN((len) + DMA_HEAP_VIDEO_PADDING))

@@ -83,7 +83,7 @@ struct page *gcma_alloc(struct gcma_heap *gcma_heap, unsigned long size)
 
 	pfn = PFN_DOWN(paddr);
 	page = phys_to_page(paddr);
-	gcma_alloc_range(pfn, pfn + (size >> PAGE_SHIFT) - 1);
+	gcma_vendor_alloc_range(pfn, pfn + (size >> PAGE_SHIFT) - 1, GFP_KERNEL);
 	gcma_set_size(page, size);
 	inc_gcma_heap_stat(gcma_heap, USAGE, size);
 	/*
@@ -221,7 +221,7 @@ static int allocate_fixed_pages(struct gcma_heap *gcma_heap, unsigned long len,
 }
 
 static struct dma_buf *gcma_heap_allocate(struct dma_heap *heap, unsigned long len,
-					    unsigned long fd_flags, unsigned long heap_flaga)
+					    u32 fd_flags, u64 heap_flags)
 {
 	struct samsung_dma_heap *samsung_dma_heap = dma_heap_get_drvdata(heap);
 	struct gcma_heap *gcma_heap = samsung_dma_heap->priv;
