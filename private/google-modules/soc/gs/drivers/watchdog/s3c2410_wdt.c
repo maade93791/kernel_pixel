@@ -45,6 +45,7 @@
 #include <linux/pid.h>
 #include <linux/sched/task.h>
 #include <soc/google/etm2dram.h>
+#include <soc/google/exynos-debug.h>
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -1895,34 +1896,6 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int s3c2410wdt_remove(struct platform_device *dev)
-{
-	int ret = 0;
-	struct s3c2410_wdt *wdt = platform_get_drvdata(dev);
-
-	if (wdt->drv_data->pmu_reset_func)
-		ret = wdt->drv_data->pmu_reset_func(wdt, true);
-	if (ret < 0)
-		return ret;
-
-	watchdog_unregister_device(&wdt->wdt_device);
-
-	s3c2410wdt_cpufreq_deregister(wdt);
-
-	clk_disable_unprepare(wdt->rate_clock);
-	wdt->rate_clock = NULL;
-	wdt->gate_clock = NULL;
-
-	unregister_pm_notifier(&s3c2410wdt_pm_nb);
-
-	if (wdt->schedstat) {
-		WARN_ON(unregister_trace_android_vh_scheduler_tick(vh_scheduler_tick, wdt));
-		free_percpu(wdt->schedstat);
-	}
-
-	return ret;
-}
-
 static void s3c2410wdt_shutdown(struct platform_device *dev)
 {
 	struct s3c2410_wdt *wdt = platform_get_drvdata(dev);
@@ -1946,17 +1919,22 @@ static void s3c2410wdt_shutdown(struct platform_device *dev)
 
 static struct platform_driver s3c2410wdt_driver = {
 	.probe		= s3c2410wdt_probe,
-	.remove		= s3c2410wdt_remove,
 	.shutdown	= s3c2410wdt_shutdown,
 	.id_table	= s3c2410_wdt_ids,
 	.driver		= {
 		.name	= "s3c2410-wdt",
+		.suppress_bind_attrs = true,
 		.pm	= &s3c_wdt_pm_ops,
 		.of_match_table	= of_match_ptr(s3c2410_wdt_match),
 	},
 };
 
-module_platform_driver(s3c2410wdt_driver);
+/* Syscore, panic and debug callbacks persist for the lifetime of the kernel. */
+static int __init s3c2410wdt_init(void)
+{
+	return platform_driver_register(&s3c2410wdt_driver);
+}
+module_init(s3c2410wdt_init);
 
 MODULE_AUTHOR("Ben Dooks <ben@simtec.co.uk>, Dimitry Andric <dimitry.andric@tomtom.com>");
 MODULE_DESCRIPTION("S3C2410 Watchdog Device Driver");
