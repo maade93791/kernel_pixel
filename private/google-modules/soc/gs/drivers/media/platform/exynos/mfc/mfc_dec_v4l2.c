@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/media/platform/exynos/mfc/mfc_dec_v4l2.c
  *
@@ -127,7 +128,7 @@ static int __mfc_dec_enum_fmt(struct mfc_dev *dev, struct v4l2_fmtdesc *f,
 
 		if (j == f->index) {
 			fmt = &dec_formats[i];
-			strlcpy(f->description, fmt->name,
+			strscpy(f->description, fmt->name,
 				sizeof(f->description));
 			f->pixelformat = fmt->fourcc;
 
@@ -1649,12 +1650,24 @@ static const struct v4l2_ioctl_ops mfc_dec_ioctl_ops = {
 	.vidioc_dqbuf			= mfc_dec_dqbuf,
 	.vidioc_streamon		= mfc_dec_streamon,
 	.vidioc_streamoff		= mfc_dec_streamoff,
-	.vidioc_queryctrl		= mfc_dec_queryctrl,
-	.vidioc_g_ctrl			= mfc_dec_g_ctrl,
-	.vidioc_s_ctrl			= mfc_dec_s_ctrl,
 	.vidioc_g_selection		= mfc_dec_g_selection,
 	.vidioc_g_ext_ctrls		= mfc_dec_g_ext_ctrls,
 };
+
+/* Called with the video-device ioctl mutex held. */
+int mfc_dec_ctrl_ioctl(struct file *file, unsigned int cmd, void *arg)
+{
+	switch (cmd) {
+	case VIDIOC_QUERYCTRL:
+		return mfc_dec_queryctrl(file, NULL, arg);
+	case VIDIOC_G_CTRL:
+		return mfc_dec_g_ctrl(file, NULL, arg);
+	case VIDIOC_S_CTRL:
+		return mfc_dec_s_ctrl(file, NULL, arg);
+	default:
+		return -ENOTTY;
+	}
+}
 
 const struct v4l2_ioctl_ops *mfc_get_dec_v4l2_ioctl_ops(void)
 {

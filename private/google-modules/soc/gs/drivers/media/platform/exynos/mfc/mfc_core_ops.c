@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/media/platform/exynos/mfc/mfc_core_ops.c
  *
@@ -280,8 +281,8 @@ static int __mfc_core_deinit(struct mfc_core *core, struct mfc_ctx *ctx)
 		if (perf_boost_mode)
 			mfc_core_perf_boost_disable(core);
 
-		del_timer(&core->meerkat_timer);
-		del_timer_sync(&core->mfc_idle_timer);
+		timer_delete(&core->meerkat_timer);
+		timer_delete_sync(&core->mfc_idle_timer);
 
 		flush_workqueue(core->butler_wq);
 
@@ -350,7 +351,7 @@ static int __mfc_force_close_inst(struct mfc_core *core, struct mfc_ctx *ctx)
 	return 0;
 }
 
-int __mfc_core_instance_init(struct mfc_core *core, struct mfc_ctx *ctx)
+static int __mfc_core_instance_init(struct mfc_core *core, struct mfc_ctx *ctx)
 {
 	struct mfc_core_ctx *core_ctx = NULL;
 	int ret = 0;

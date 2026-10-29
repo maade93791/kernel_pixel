@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/media/platform/exynos/mfc/mfc_enc_v4l2.c
  *
@@ -198,7 +199,7 @@ static int __mfc_enc_enum_fmt(struct mfc_dev *dev, struct v4l2_fmtdesc *f,
 
 		if (j == f->index) {
 			fmt = &enc_formats[i];
-			strlcpy(f->description, fmt->name,
+			strscpy(f->description, fmt->name,
 				sizeof(f->description));
 			f->pixelformat = fmt->fourcc;
 
@@ -1130,7 +1131,7 @@ static int __mfc_enc_get_ctrl_val(struct mfc_ctx *ctx, struct v4l2_control *ctrl
 	case V4L2_CID_MPEG_MFC51_VIDEO_FRAME_STATUS:
 	case V4L2_CID_MPEG_VIDEO_SRC_BUF_FLAG:
 	case V4L2_CID_MPEG_VIDEO_DST_BUF_FLAG:
-	case V4L2_CID_MPEG_VIDEO_AVERAGE_QP:
+	case V4L2_CID_MPEG_MFC_VIDEO_AVERAGE_QP:
 	case V4L2_CID_MPEG_VIDEO_SUM_SKIP_MB:
 	case V4L2_CID_MPEG_VIDEO_SUM_INTRA_MB:
 	case V4L2_CID_MPEG_VIDEO_SUM_ZERO_MV_MB:
@@ -2388,13 +2389,25 @@ static const struct v4l2_ioctl_ops mfc_enc_ioctl_ops = {
 	.vidioc_dqbuf			= mfc_enc_dqbuf,
 	.vidioc_streamon		= mfc_enc_streamon,
 	.vidioc_streamoff		= mfc_enc_streamoff,
-	.vidioc_queryctrl		= mfc_enc_queryctrl,
-	.vidioc_g_ctrl			= mfc_enc_g_ctrl,
-	.vidioc_s_ctrl			= mfc_enc_s_ctrl,
 	.vidioc_g_ext_ctrls		= mfc_enc_g_ext_ctrls,
 	.vidioc_s_ext_ctrls		= mfc_enc_s_ext_ctrls,
 	.vidioc_try_ext_ctrls		= mfc_enc_try_ext_ctrls,
 };
+
+/* Called with the video-device ioctl mutex held. */
+int mfc_enc_ctrl_ioctl(struct file *file, unsigned int cmd, void *arg)
+{
+	switch (cmd) {
+	case VIDIOC_QUERYCTRL:
+		return mfc_enc_queryctrl(file, NULL, arg);
+	case VIDIOC_G_CTRL:
+		return mfc_enc_g_ctrl(file, NULL, arg);
+	case VIDIOC_S_CTRL:
+		return mfc_enc_s_ctrl(file, NULL, arg);
+	default:
+		return -ENOTTY;
+	}
+}
 
 const struct v4l2_ioctl_ops *mfc_get_enc_v4l2_ioctl_ops(void)
 {
