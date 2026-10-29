@@ -41,7 +41,7 @@
 #include <soc/google/exynos-cpuhp.h>
 
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/thermal_exynos.h>

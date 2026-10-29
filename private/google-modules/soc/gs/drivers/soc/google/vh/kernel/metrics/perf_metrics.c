@@ -26,7 +26,7 @@
 #include <trace/hooks/sched.h>
 #include "perf_metrics.h"
 #include "metrics.h"
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 #include <trace/hooks/systrace.h>
 #include "../../include/sched.h"
 #include <kernel/sched/sched.h>

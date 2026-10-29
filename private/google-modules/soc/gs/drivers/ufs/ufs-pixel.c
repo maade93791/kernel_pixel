@@ -940,7 +940,7 @@ static ssize_t manual_gc_store(struct device *dev,
 	}
 
 	if (!ufs->manual_gc.hagc_support) {
-		err = ufshcd_bkops_ctrl_level(hba, (value == MANUAL_GC_ON) ?
+		err = ufshcd_bkops_ctrl_threshold(hba, (value == MANUAL_GC_ON) ?
 					BKOPS_STATUS_NON_CRITICAL:
 					BKOPS_STATUS_CRITICAL);
 		if (!hba->auto_bkops_enabled)

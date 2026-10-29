@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/sched/clock.h>
 #include <kernel/sched/sched.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 #include "../../include/sched.h"
 #include "sched_events.h"
 #include "binder_internal.h"

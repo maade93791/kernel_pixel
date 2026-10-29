@@ -22,7 +22,7 @@
 #include <trace/events/thermal_exynos_gpu.h>
 #undef CREATE_TRACE_POINTS
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 
 /**
  * struct power_table - Stores a frequency to power translation
