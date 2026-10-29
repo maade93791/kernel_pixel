@@ -18,7 +18,6 @@
 #include <linux/delay.h>
 #include <linux/regulator/consumer.h>
 #include <linux/gpio/consumer.h>
-#include <linux/of_gpio.h>
 #include <linux/backlight.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_connector.h>
@@ -774,9 +773,8 @@ struct te2_data {
 };
 
 struct ready_signal_t {
-	int gpio;
+	struct gpio_desc *gpio;
 	int irq;
-	enum of_gpio_flags gpio_flags;
 	struct completion detected;
 };
 

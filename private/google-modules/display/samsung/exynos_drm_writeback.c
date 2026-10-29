@@ -776,7 +776,7 @@ fail:
 	return ret;
 }
 
-static int writeback_remove(struct platform_device *pdev)
+static void writeback_remove(struct platform_device *pdev)
 {
 	struct writeback_device *wb = platform_get_drvdata(pdev);
 
@@ -785,8 +785,6 @@ static int writeback_remove(struct platform_device *pdev)
 	if (test_bit(DPP_ATTR_DPP, &wb->attr))
 		iounmap(wb->regs.dpp_base_regs);
 	iounmap(wb->regs.dma_base_regs);
-
-	return 0;
 }
 
 struct platform_driver writeback_driver = {

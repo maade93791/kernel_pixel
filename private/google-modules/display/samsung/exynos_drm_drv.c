@@ -48,7 +48,6 @@
 
 #define DRIVER_NAME	"exynos"
 #define DRIVER_DESC	"Samsung SoC DRM"
-#define DRIVER_DATE	"20110530"
 #define DRIVER_MAJOR	1
 #define DRIVER_MINOR	0
 
@@ -1030,7 +1029,6 @@ static struct drm_driver exynos_drm_driver = {
 	.fops			   = &exynos_drm_driver_fops,
 	.name			   = DRIVER_NAME,
 	.desc			   = DRIVER_DESC,
-	.date			   = DRIVER_DATE,
 	.major			   = DRIVER_MAJOR,
 	.minor			   = DRIVER_MINOR,
 };
@@ -1192,18 +1190,6 @@ static int exynos_drm_bind(struct device *dev)
 
 	drm_mode_config_reset(drm);
 
-	/*
-	 * enable drm irq mode.
-	 * - with irq_enabled = true, we can use the vblank feature.
-	 *
-	 * P.S. note that we wouldn't use drm irq handler but
-	 *	just specific driver own one instead because
-	 *	drm framework supports only one irq handler.
-	 */
-#if IS_ENABLED(CONFIG_DRM_LEGACY)
-	drm->irq_enabled = true;
-#endif
-
 	/* init kms poll for handling hpd */
 	drm_kms_helper_poll_init(drm);
 
@@ -1269,10 +1255,9 @@ static int exynos_drm_platform_probe(struct platform_device *pdev)
 					       match);
 }
 
-static int exynos_drm_platform_remove(struct platform_device *pdev)
+static void exynos_drm_platform_remove(struct platform_device *pdev)
 {
 	component_master_del(&pdev->dev, &exynos_drm_ops);
-	return 0;
 }
 
 static void exynos_drm_platform_shutdown(struct platform_device *pdev)
@@ -1401,5 +1386,5 @@ MODULE_AUTHOR("Inki Dae <inki.dae@samsung.com>");
 MODULE_AUTHOR("Joonyoung Shim <jy0922.shim@samsung.com>");
 MODULE_AUTHOR("Seung-Woo Kim <sw0312.kim@samsung.com>");
 MODULE_DESCRIPTION("Samsung SoC DRM Driver");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 MODULE_LICENSE("GPL");
