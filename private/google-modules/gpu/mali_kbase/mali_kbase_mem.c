@@ -230,7 +230,12 @@ int kbase_mem_init(struct kbase_device *kbdev)
 		return -ENOMEM;
 	}
 
-	kbase_mem_migrate_init(kbdev);
+	err = kbase_mem_migrate_init(kbdev);
+	if (err) {
+		kmem_cache_destroy(kbdev->va_region_slab);
+		kbdev->va_region_slab = NULL;
+		return err;
+	}
 
 	if ((GPU_PAGES_PER_CPU_PAGE > 1) || kbase_is_page_migration_enabled()) {
 		char page_metadata_slab_name[PAGE_METADATA_SLAB_NAME_SIZE];
@@ -308,14 +313,17 @@ int kbase_mem_init(struct kbase_device *kbdev)
 	if (likely(!err))
 		return err;
 
+	kbase_mem_migrate_quiesce(kbdev);
 	kbase_mem_pool_term(&kbdev->fw_mem_pools.small);
 term_kbase_pgd_mem_pool:
+	kbase_mem_migrate_quiesce(kbdev);
 	kbase_mem_pool_term(&kbdev->pgd_mem_pool);
 init_fail:
+page_metadata_slab_fail:
+	/* Deferred frees still need the metadata slab. */
+	kbase_mem_migrate_term(kbdev);
 	kmem_cache_destroy(kbdev->page_metadata_slab);
 	kbdev->page_metadata_slab = NULL;
-page_metadata_slab_fail:
-	kbase_mem_migrate_term(kbdev);
 	kmem_cache_destroy(kbdev->va_region_slab);
 	kbdev->va_region_slab = NULL;
 
@@ -333,6 +341,7 @@ void kbase_mem_term(struct kbase_device *kbdev)
 	int pages;
 
 	KBASE_DEBUG_ASSERT(kbdev);
+	kbase_mem_migrate_quiesce(kbdev);
 
 	memdev = &kbdev->memdev;
 

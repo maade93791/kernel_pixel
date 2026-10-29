@@ -20,23 +20,12 @@
 #include "pixel_gpu_control.h"
 #include <linux/platform_data/sscoredump.h>
 #include <linux/platform_device.h>
+#include <linux/mutex.h>
 
 /* Mali SSCD collection is only enabled for CSF GPUs*/
 
-static void sscd_release(struct device *dev)
-{
-	(void)dev;
-}
-
-static struct sscd_platform_data sscd_pdata;
-const static struct platform_device sscd_dev_init = { .name = "mali",
-						      .driver_override = SSCD_NAME,
-						      .id = -1,
-						      .dev = {
-							      .platform_data = &sscd_pdata,
-							      .release = sscd_release,
-						      } };
-static struct platform_device sscd_dev;
+static struct platform_device *sscd_dev;
+static DEFINE_MUTEX(sscd_dev_lock);
 
 /* There are more segments here than what we actually collect, we leave them here
  * to have backward compatibility with the parser.
@@ -610,12 +599,16 @@ static void segments_term(struct kbase_device *kbdev, struct sscd_segment* segme
 void gpu_sscd_dump(struct kbase_device *kbdev, const char* reason)
 {
 	struct sscd_segment segs[NUM_SEGMENTS];
-	struct sscd_platform_data *pdata = dev_get_platdata(&sscd_dev.dev);
+	struct sscd_platform_data *pdata;
 	struct pixel_context *pc = kbdev->platform_context;
 	int ec = 0;
 	unsigned long flags, current_ts = jiffies;
 	struct pixel_gpu_pdc_status pdc_status;
 	static unsigned long last_hang_sscd_ts;
+
+	/* Keep the device, callback data and report alive through completion. */
+	mutex_lock(&sscd_dev_lock);
+	pdata = sscd_dev ? dev_get_platdata(&sscd_dev->dev) : NULL;
 
 	if (!strcmp(reason, "GPU hang")) {
 		/* GPU hang - avoid multiple coredumps for the same hang until
@@ -627,15 +620,15 @@ void gpu_sscd_dump(struct kbase_device *kbdev, const char* reason)
 			last_hang_sscd_ts = current_ts;
 		} else {
 			dev_info(kbdev->dev, "pixel: skipping mali subsystem core dump");
-			return;
+			goto unlock_device;
 		}
 	}
 
 	dev_info(kbdev->dev, "pixel: mali subsystem core dump in progress");
 	/* No point in proceeding if we can't report the dumped data */
-	if (!pdata->sscd_report) {
+	if (!pdata || !pdata->sscd_report) {
 		dev_warn(kbdev->dev, "pixel: failed to report core dump, sscd_report was NULL");
-		return;
+		goto unlock_device;
 	}
 
 	ec = segments_init(kbdev, segs);
@@ -680,12 +673,14 @@ void gpu_sscd_dump(struct kbase_device *kbdev, const char* reason)
 	get_rail_state_log(kbdev, &segs[POWER_RAIL_LOG]);
 
 	/* Report the core dump and generate an ELF header for it */
-	pdata->sscd_report(&sscd_dev, segs, NUM_SEGMENTS, SSCD_FLAGS_ELFARM64HDR, reason);
+	pdata->sscd_report(sscd_dev, segs, NUM_SEGMENTS, SSCD_FLAGS_ELFARM64HDR, reason);
 
 	/* Must be held until the dump completes, as the log is referenced rather than copied */
 	mutex_unlock(&pc->pm.lock);
 
 	segments_term(kbdev, segs);
+unlock_device:
+	mutex_unlock(&sscd_dev_lock);
 }
 
 /**
@@ -722,8 +717,35 @@ int gpu_sscd_fw_log_init(struct kbase_device *kbdev, u32 level)
  */
 int gpu_sscd_init(struct kbase_device *kbdev)
 {
-	sscd_dev = sscd_dev_init;
-	return platform_device_register(&sscd_dev);
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
+
+	pdev = platform_device_alloc("mali", -1);
+	if (!pdev)
+		return -ENOMEM;
+
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	mutex_lock(&sscd_dev_lock);
+	ret = platform_device_add(pdev);
+	if (!ret)
+		sscd_dev = pdev;
+	mutex_unlock(&sscd_dev_lock);
+	if (ret)
+		goto put_device;
+
+	return 0;
+
+put_device:
+	platform_device_put(pdev);
+	return ret;
 }
 
 /**
@@ -735,5 +757,10 @@ int gpu_sscd_init(struct kbase_device *kbdev)
  */
 void gpu_sscd_term(struct kbase_device *kbdev)
 {
-	platform_device_unregister(&sscd_dev);
+	mutex_lock(&sscd_dev_lock);
+	if (sscd_dev) {
+		platform_device_unregister(sscd_dev);
+		sscd_dev = NULL;
+	}
+	mutex_unlock(&sscd_dev_lock);
 }

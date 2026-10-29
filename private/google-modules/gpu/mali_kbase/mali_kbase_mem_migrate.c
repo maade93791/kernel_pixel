@@ -23,6 +23,7 @@
  * DOC: Base kernel page migration implementation.
  */
 #include <linux/migrate.h>
+#include <linux/wait.h>
 
 #include <mali_kbase.h>
 #include <mali_kbase_mem.h>
@@ -52,6 +53,72 @@ bool kbase_is_page_migration_enabled(void)
 }
 KBASE_EXPORT_TEST_API(kbase_is_page_migration_enabled);
 
+/* Admission is closed before teardown; no GPU/MMU resource lock is held. */
+static bool kbase_migrate_user_get(struct kbase_device *kbdev)
+{
+	struct kbase_mem_migrate *migrate = &kbdev->mem_migrate;
+	unsigned long flags;
+	bool admitted;
+
+	spin_lock_irqsave(&migrate->state_lock, flags);
+	admitted = !migrate->quiescing;
+	if (admitted)
+		migrate->active_users++;
+	spin_unlock_irqrestore(&migrate->state_lock, flags);
+	return admitted;
+}
+
+static void kbase_migrate_user_put(struct kbase_device *kbdev, bool isolated)
+{
+	struct kbase_mem_migrate *migrate = &kbdev->mem_migrate;
+	unsigned long flags;
+
+	spin_lock_irqsave(&migrate->state_lock, flags);
+	if (isolated)
+		migrate->isolated_pages++;
+	migrate->active_users--;
+	wake_up_all(&migrate->wait);
+	spin_unlock_irqrestore(&migrate->state_lock, flags);
+}
+
+static void kbase_migrate_isolation_put(struct kbase_device *kbdev)
+{
+	struct kbase_mem_migrate *migrate = &kbdev->mem_migrate;
+	unsigned long flags;
+
+	spin_lock_irqsave(&migrate->state_lock, flags);
+	WARN_ON(!migrate->isolated_pages);
+	migrate->isolated_pages--;
+	wake_up_all(&migrate->wait);
+	/* Last device access; the quiesce condition takes this same lock. */
+	spin_unlock_irqrestore(&migrate->state_lock, flags);
+}
+
+static bool kbase_migrate_quiet(struct kbase_mem_migrate *migrate)
+{
+	unsigned long flags;
+	bool quiet;
+
+	spin_lock_irqsave(&migrate->state_lock, flags);
+	quiet = !migrate->active_users && !migrate->isolated_pages;
+	spin_unlock_irqrestore(&migrate->state_lock, flags);
+	return quiet;
+}
+
+void kbase_mem_migrate_quiesce(struct kbase_device *kbdev)
+{
+	struct kbase_mem_migrate *migrate = &kbdev->mem_migrate;
+	unsigned long flags;
+
+	if (!READ_ONCE(migrate->initialized))
+		return;
+
+	spin_lock_irqsave(&migrate->state_lock, flags);
+	migrate->quiescing = true;
+	spin_unlock_irqrestore(&migrate->state_lock, flags);
+	wait_event(migrate->wait, kbase_migrate_quiet(migrate));
+}
+
 bool kbase_alloc_page_metadata(struct kbase_device *kbdev, struct page *p, dma_addr_t dma_addr,
 			       u8 group_id)
 {
@@ -66,10 +133,17 @@ bool kbase_alloc_page_metadata(struct kbase_device *kbdev, struct page *p, dma_a
 	if (is_huge_head(as_tagged(page_to_phys(p))) || is_partial(as_tagged(page_to_phys(p))))
 		dev_WARN(kbdev->dev, "%s: migration-metadata attempted on large-page.", __func__);
 
-	page_md = kmem_cache_zalloc(kbdev->page_metadata_slab, GFP_KERNEL);
-	if (!page_md)
+	if (!kbase_migrate_user_get(kbdev))
 		return false;
+	page_md = kmem_cache_zalloc(kbdev->page_metadata_slab, GFP_KERNEL);
+	if (!page_md) {
+		kbase_migrate_user_put(kbdev, false);
+		return false;
+	}
+	atomic_inc(&kbdev->mem_migrate.metadata_pages);
 
+	/* Publish only complete metadata, including on a still-typed page. */
+	lock_page(p);
 	SetPagePrivate(p);
 	set_page_private(p, (unsigned long)page_md);
 	page_md->kbdev = kbdev;
@@ -80,9 +154,9 @@ bool kbase_alloc_page_metadata(struct kbase_device *kbdev, struct page *p, dma_a
 	spin_lock_init(&page_md->migrate_lock);
 	sema_init(&page_md->cpu_map_lock, 1);
 
-	lock_page(p);
 #if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-	__SetPageMovable(p, &movable_ops);
+	__SetPageGpu(p);
+	SetPageMovableOps(p);
 	page_md->status = PAGE_MOVABLE_SET(page_md->status);
 #else
 	/* In some corner cases, the driver may attempt to allocate memory pages
@@ -108,6 +182,7 @@ bool kbase_alloc_page_metadata(struct kbase_device *kbdev, struct page *p, dma_a
 	}
 #endif
 	unlock_page(p);
+	kbase_migrate_user_put(kbdev, false);
 
 	return true;
 }
@@ -121,6 +196,7 @@ static void kbase_free_page_metadata(struct kbase_device *kbdev, struct page *p,
 	if (!kbase_is_page_migration_enabled())
 		return;
 
+	VM_BUG_ON_PAGE(!PageLocked(p), p);
 	page_md = kbase_page_private(p);
 	if (!page_md)
 		return;
@@ -133,6 +209,8 @@ static void kbase_free_page_metadata(struct kbase_device *kbdev, struct page *p,
 	kmem_cache_free(kbdev->page_metadata_slab, page_md);
 	set_page_private(p, 0);
 	ClearPagePrivate(p);
+	if (atomic_dec_and_test(&kbdev->mem_migrate.metadata_pages))
+		wake_up_all(&kbdev->mem_migrate.wait);
 }
 
 /* This function is only called when page migration
@@ -157,7 +235,6 @@ static void kbase_free_pages_worker(struct work_struct *work)
 		lock_page(p);
 		page_md = kbase_page_private(p);
 		if (page_md && IS_PAGE_MOVABLE(page_md->status)) {
-			__ClearPageMovable(p);
 			page_md->status = PAGE_MOVABLE_CLEAR(page_md->status);
 		}
 		kbase_free_page_metadata(kbdev, p, &group_id);
@@ -235,12 +312,13 @@ static int kbasep_migrate_page_pt_mapped(struct page *old_page, struct page *new
 
 	if (ret == 0) {
 		dma_unmap_page(kbdev->dev, old_dma_addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
-		__ClearPageMovable(old_page);
+
 		ClearPagePrivate(old_page);
 		put_page(old_page);
 
 #if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-		__SetPageMovable(new_page, &movable_ops);
+		__SetPageGpu(new_page);
+		SetPageMovableOps(new_page);
 		spin_lock(&page_md->migrate_lock);
 		page_md->status = PAGE_MOVABLE_SET(page_md->status);
 		spin_unlock(&page_md->migrate_lock);
@@ -350,14 +428,15 @@ static int kbasep_migrate_page_allocated_mapped(struct page *old_page, struct pa
 		set_page_private(new_page, (unsigned long)page_md);
 		get_page(new_page);
 
-		/* Clear PG_movable from the old page and release reference. */
+		/* Keep the retired page typed until the core frees its last reference. */
 		ClearPagePrivate(old_page);
-		__ClearPageMovable(old_page);
+
 		put_page(old_page);
 
-		/* Set PG_movable to the new page. */
+		/* Publish the new page through the native typed movable-page API. */
 #if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-		__SetPageMovable(new_page, &movable_ops);
+		__SetPageGpu(new_page);
+		SetPageMovableOps(new_page);
 		spin_lock(&page_md->migrate_lock);
 		page_md->status = PAGE_MOVABLE_SET(page_md->status);
 		spin_unlock(&page_md->migrate_lock);
@@ -398,7 +477,7 @@ KBASE_EXPORT_TEST_API(kbase_migrate_page_allocated_mapped);
  *
  * Return: true on success, false otherwise.
  */
-static bool kbase_page_isolate(struct page *p, isolate_mode_t mode)
+static bool kbase_page_isolate_impl(struct page *p, isolate_mode_t mode)
 {
 	bool status_mem_pool = false;
 	struct kbase_mem_pool *mem_pool = NULL;
@@ -463,8 +542,7 @@ static bool kbase_page_isolate(struct page *p, isolate_mode_t mode)
 	case FREE_IN_PROGRESS:
 		break;
 	case NOT_MOVABLE:
-		/* Opportunistically clear the movable property for these pages */
-		__ClearPageMovable(p);
+		/* Stop future isolation through metadata; the core tag stays sticky. */
 		page_md->status = PAGE_MOVABLE_CLEAR(page_md->status);
 		break;
 	default:
@@ -523,10 +601,10 @@ static bool kbase_page_isolate(struct page *p, isolate_mode_t mode)
  * Return: 0 on success, error code otherwise.
  */
 #if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE)
-static int kbase_page_migrate(struct address_space *mapping, struct page *new_page,
+static int kbase_page_migrate_impl(struct address_space *mapping, struct page *new_page,
 			      struct page *old_page, enum migrate_mode mode)
 #else
-static int kbase_page_migrate(struct page *new_page, struct page *old_page, enum migrate_mode mode)
+static int kbase_page_migrate_impl(struct page *new_page, struct page *old_page, enum migrate_mode mode)
 #endif
 {
 	int err = 0;
@@ -589,7 +667,7 @@ static int kbase_page_migrate(struct page *new_page, struct page *old_page, enum
 		struct kbase_mem_migrate *mem_migrate = &kbdev->mem_migrate;
 
 		kbase_free_page_metadata(kbdev, old_page, NULL);
-		__ClearPageMovable(old_page);
+
 		put_page(old_page);
 
 		/* Just free new page to avoid lock contention. */
@@ -608,11 +686,10 @@ static int kbase_page_migrate(struct page *new_page, struct page *old_page, enum
 
 	/* While we want to preserve the movability of pages for which we return
 	 * EAGAIN, according to the kernel docs, movable pages for which a critical
-	 * error is returned are called putback on, which may not be what we
-	 * expect.
+	 * error is returned are called putback on. Keep native dispatch alive
+	 * for that terminal callback, while disabling subsequent isolation.
 	 */
 	if (err < 0 && err != -EAGAIN) {
-		__ClearPageMovable(old_page);
 		page_md->status = PAGE_MOVABLE_CLEAR(page_md->status);
 	}
 
@@ -630,7 +707,7 @@ static int kbase_page_migrate(struct page *new_page, struct page *old_page, enum
  * in before it was isolated.
  * This callback is not registered if page migration is disabled.
  */
-static void kbase_page_putback(struct page *p)
+static void kbase_page_putback_impl(struct page *p)
 {
 	bool status_mem_pool = false;
 	bool status_free_isolated_in_progress = false;
@@ -688,7 +765,6 @@ static void kbase_page_putback(struct page *p)
 	 */
 	if (status_mem_pool || status_free_isolated_in_progress ||
 	    status_free_pt_isolated_in_progress) {
-		__ClearPageMovable(p);
 		page_md->status = PAGE_MOVABLE_CLEAR(page_md->status);
 		if (!WARN_ON_ONCE(!kbdev)) {
 			struct kbase_mem_migrate *mem_migrate = &kbdev->mem_migrate;
@@ -697,6 +773,50 @@ static void kbase_page_putback(struct page *p)
 			queue_work(mem_migrate->free_pages_workq, &mem_migrate->free_pages_work);
 		}
 	}
+}
+
+static bool kbase_page_isolate(struct page *page, isolate_mode_t mode)
+{
+	struct kbase_page_metadata *metadata = kbase_page_private(page);
+	struct kbase_device *kbdev;
+	bool isolated;
+
+	/* The core holds the page lock; metadata removal takes that same lock. */
+	if (!metadata)
+		return false;
+	kbdev = metadata->kbdev;
+	if (!kbase_migrate_user_get(kbdev))
+		return false;
+	isolated = kbase_page_isolate_impl(page, mode);
+	kbase_migrate_user_put(kbdev, isolated);
+	return isolated;
+}
+
+static int kbase_page_migrate(struct page *dst, struct page *src, enum migrate_mode mode)
+{
+	struct kbase_page_metadata *metadata = kbase_page_private(src);
+	struct kbase_device *kbdev;
+	int ret;
+
+	if (WARN_ON(!metadata))
+		return -EINVAL;
+	kbdev = metadata->kbdev;
+	ret = kbase_page_migrate_impl(dst, src, mode);
+	if (!ret)
+		kbase_migrate_isolation_put(kbdev);
+	return ret;
+}
+
+static void kbase_page_putback(struct page *page)
+{
+	struct kbase_page_metadata *metadata = kbase_page_private(page);
+	struct kbase_device *kbdev;
+
+	if (WARN_ON(!metadata))
+		return;
+	kbdev = metadata->kbdev;
+	kbase_page_putback_impl(page);
+	kbase_migrate_isolation_put(kbdev);
 }
 
 #if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
@@ -712,6 +832,19 @@ static const struct address_space_operations kbase_address_space_ops = {
 	.putback_page = kbase_page_putback,
 };
 #endif
+
+int kbase_mem_migrate_register(void)
+{
+	if (!IS_ENABLED(CONFIG_COMPACTION))
+		return 0;
+	return register_gpu_movable_ops(&movable_ops, THIS_MODULE);
+}
+
+void kbase_mem_migrate_unregister(void)
+{
+	if (IS_ENABLED(CONFIG_COMPACTION))
+		WARN_ON(unregister_gpu_movable_ops(&movable_ops));
+}
 
 #if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE)
 void kbase_mem_migrate_set_address_space_ops(struct kbase_device *kbdev, struct file *const filp)
@@ -739,49 +872,63 @@ void kbase_mem_migrate_set_address_space_ops(struct kbase_device *kbdev, struct 
 }
 #endif
 
-void kbase_mem_migrate_init(struct kbase_device *kbdev)
+int kbase_mem_migrate_init(struct kbase_device *kbdev)
 {
 	struct kbase_mem_migrate *mem_migrate = &kbdev->mem_migrate;
 
-	/* Page migration should only be enabled if compaction is
-	 * enabled in the kernel otherwise pages cannot be marked as
-	 * movable.
-	 *
-	 * Page migration support compiled in, either explicitly or
-	 * by default, so the default behaviour is to follow the choice
-	 * of large pages if not selected at insmod. Check insmod parameter
-	 * integer for a negative value to see if insmod parameter was
-	 * passed in at all (it will override the default negative value).
-	 */
+	spin_lock_init(&mem_migrate->state_lock);
+	init_waitqueue_head(&mem_migrate->wait);
+	mem_migrate->quiescing = false;
+	mem_migrate->active_users = 0;
+	mem_migrate->isolated_pages = 0;
+	atomic_set(&mem_migrate->metadata_pages, 0);
+	mem_migrate->enabled = false;
+	spin_lock_init(&mem_migrate->free_pages_lock);
+	INIT_LIST_HEAD(&mem_migrate->free_pages_list);
+	INIT_WORK(&mem_migrate->free_pages_work, kbase_free_pages_worker);
+	mem_migrate->free_pages_workq =
+		alloc_workqueue("free_pages_workq", WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
+	if (!mem_migrate->free_pages_workq)
+		return -ENOMEM;
+	mem_migrate->initialized = true;
+
+	/* Preserve the parameter, compaction and large-page enable policy. */
 	if (IS_ENABLED(CONFIG_COMPACTION)) {
 		if (kbase_page_migration_enabled < 0) {
-			if (kbase_is_large_pages_enabled())
-				static_branch_inc(&page_migration_static_key);
+			mem_migrate->enabled = kbase_is_large_pages_enabled();
 		} else {
 			dev_info(kbdev->dev, "Page migration support explicitly %s at insmod.",
 				 kbase_page_migration_enabled ? "enabled" : "disabled");
-			if (kbase_page_migration_enabled)
-				static_branch_inc(&page_migration_static_key);
+			mem_migrate->enabled = !!kbase_page_migration_enabled;
 		}
 	} else if (kbase_page_migration_enabled) {
 		dev_warn(kbdev->dev,
 			 "No CONFIG_COMPACTION. 'page migration support enable' ignored.");
 	}
-
-	spin_lock_init(&mem_migrate->free_pages_lock);
-	INIT_LIST_HEAD(&mem_migrate->free_pages_list);
-
-	mem_migrate->free_pages_workq =
-		alloc_workqueue("free_pages_workq", WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
-	INIT_WORK(&mem_migrate->free_pages_work, kbase_free_pages_worker);
+	if (mem_migrate->enabled)
+		static_branch_inc(&page_migration_static_key);
+	return 0;
 }
 
 void kbase_mem_migrate_term(struct kbase_device *kbdev)
 {
 	struct kbase_mem_migrate *mem_migrate = &kbdev->mem_migrate;
 
-	if (mem_migrate->free_pages_workq)
-		destroy_workqueue(mem_migrate->free_pages_workq);
+	if (!mem_migrate->initialized)
+		return;
+	kbase_mem_migrate_quiesce(kbdev);
+	flush_workqueue(mem_migrate->free_pages_workq);
+	if (atomic_read(&mem_migrate->metadata_pages))
+		dev_warn(kbdev->dev, "Waiting for %d migration metadata owners before teardown\n",
+			 atomic_read(&mem_migrate->metadata_pages));
+	wait_event(mem_migrate->wait, !atomic_read(&mem_migrate->metadata_pages));
+	destroy_workqueue(mem_migrate->free_pages_workq);
+	mem_migrate->free_pages_workq = NULL;
+	mem_migrate->initialized = false;
+	if (mem_migrate->enabled) {
+		static_branch_dec(&page_migration_static_key);
+		mem_migrate->enabled = false;
+	}
 #if (KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE)
 	iput(mem_migrate->inode);
 #endif

@@ -26,6 +26,7 @@
 #include <mali_kbase_gator.h>
 #include <mali_kbase_reg_track.h>
 #include <mali_kbase_mem_linux.h>
+#include <mali_kbase_mem_migrate.h>
 #ifdef CONFIG_MALI_DEVFREQ
 #include <linux/devfreq.h>
 #include <backend/gpu/mali_kbase_devfreq.h>
@@ -4941,20 +4942,27 @@ static int __init kbase_driver_init(void)
 	if (ret)
 		return ret;
 #endif
+	ret = kbase_mem_migrate_register();
+	if (ret)
+		goto err_platform;
 	ret = platform_driver_register(&kbase_platform_driver);
-#ifndef CONFIG_OF
-	if (ret) {
-		kbase_platform_unregister();
-		return ret;
-	}
-#endif
+	if (ret)
+		goto err_migration;
+	return 0;
 
+err_migration:
+	kbase_mem_migrate_unregister();
+err_platform:
+#ifndef CONFIG_OF
+	kbase_platform_unregister();
+#endif
 	return ret;
 }
 
 static void __exit kbase_driver_exit(void)
 {
 	platform_driver_unregister(&kbase_platform_driver);
+	kbase_mem_migrate_unregister();
 #ifndef CONFIG_OF
 	kbase_platform_unregister();
 #endif
@@ -4964,7 +4972,7 @@ module_init(kbase_driver_init);
 module_exit(kbase_driver_exit);
 #endif
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 MODULE_VERSION(MALI_RELEASE_NAME " (UK version " \
 		__stringify(BASE_UK_VERSION_MAJOR) "." \
 		__stringify(BASE_UK_VERSION_MINOR) ")");
