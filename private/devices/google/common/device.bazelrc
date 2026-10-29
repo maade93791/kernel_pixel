@@ -2,14 +2,6 @@
 #
 # Copyright (C) 2023 Google LLC
 
-build --flag_alias=kernel_package=//common:kernel_package
-build --flag_alias=use_prebuilt_kernel=//common:kernel_package_use_prebuilt_kernel
-build --flag_alias=nouse_prebuilt_kernel=no//common:kernel_package_use_prebuilt_kernel
-
-# Build the GrapheneOS ACK 6.18 kernel and its modules from source.
-build --kernel_package=ack
-build --nouse_prebuilt_kernel
-
 # Rebuild the kernel and all modules together instead of preserving Google's KMI.
 build --notrim
 build --nokmi_symbol_list_strict_mode
@@ -26,7 +18,6 @@ build:factory --//private/devices/google/common:factory
 build:testing --notrim
 build:testing --gcov_mode=profile_all
 build:testing --//private/devices/google/common:kunit
-build:testing --nouse_prebuilt_kernel
 
 # Build kunit modules
 build:kunit --notrim
@@ -35,8 +26,4 @@ build:kunit --//private/devices/google/common:kunit
 # Build 16k page size kernel
 build:16k --page_size=16k
 
-# For compatibility only. Do no introduce new usage of these configs.
-# Use --kernel_package directly.
-build:use_source_tree_aosp --kernel_package=ack
-# Use --config=testing or --config=kunit.
 build:pixel_kunit --config=kunit

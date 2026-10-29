@@ -9,7 +9,7 @@ if [ -z "$BUILD_ON_BUILD_BOT" ]; then
   GKI_REMOTE="aosp"
 else
   GKI_REMOTE="android"
-  git -C common/ack branch -D update_symbol_list-delete-after-push
+  git -C common branch -D update_symbol_list-delete-after-push
 fi
 GKI_BRANCH="android14-6.1" # Need to push symbol list changes to the main ACK branch (not release branches)
 PIXEL_SYMBOL_LIST="android/abi_gki_aarch64_pixel"
@@ -24,7 +24,7 @@ function usage {
 
   echo "$0 --config TARGET [-p|--prepare-aosp-abi BUG_NUMBER] [--change-id CHANGE_ID] [--continue]"
   echo
-  echo "This script will update the pixel symbol list in common/ack."
+  echo "This script will update the pixel symbol list in common."
   echo
   echo " The following arguments are supported:"
   echo "  --config <device-name>               Specifies which target to build."
@@ -87,11 +87,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 function bazel_cquery() {
-  tools/bazel cquery --config="${TARGET}" --kernel_package=ack "$@"
+  tools/bazel cquery --config="${TARGET}" "$@"
 }
 
 function bazel_run() {
-  tools/bazel run --config="${TARGET}" --kernel_package=ack "$@"
+  tools/bazel run --config="${TARGET}" "$@"
 }
 
 KERNEL_TARGET="$(bazel_cquery \

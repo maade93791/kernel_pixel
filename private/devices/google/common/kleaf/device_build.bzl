@@ -6,7 +6,8 @@ Define build targets for a device.
 
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:select_file.bzl", "select_file")
-load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
+load("@rules_pkg//pkg:install.bzl", "pkg_install")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 load("//build/kernel/kleaf:constants.bzl", "COMMON_KCFLAGS")
 load(
     "//build/kernel/kleaf:kernel.bzl",
@@ -122,11 +123,12 @@ def device_build(
         base_insmod_cfgs = ["{}/insmod_cfgs".format(base_device)]
     else:
         base_build_configs = [
+            "//common:set_kernel_dir_build_config",
             "//private/devices/google/common/kleaf/files:build.config.common",
         ]
         base_kconfigs = []
-        base_kconfig_exts = ["//common:kernel_package_kconfig"]
-        base_defconfig_fragments = ["//common:kernel_package_defconfig_fragment"]
+        base_kconfig_exts = []
+        base_defconfig_fragments = []
         base_ext_modules = []
         base_ddk_uapi_headers = []
         base_vendor_ramdisk_modules_lists = []
@@ -501,18 +503,17 @@ def device_build(
         )
         dist_targets.append(target_dtb_image)
 
-    native.filegroup(
+    pkg_files(
         name = target_dist_files,
         srcs = dist_targets,
+        strip_prefix = strip_prefix.files_only(),
         visibility = ["//visibility:private"],
     )
 
-    copy_to_dist_dir(
+    pkg_install(
         name = target_dist,
-        data = [target_dist_files],
-        dist_dir = "out/{}/dist".format(name),
-        flat = True,
-        log = "info",
+        srcs = [target_dist_files],
+        destdir = "out/{}/dist".format(name),
         visibility = ["//visibility:private"],
     )
 
