@@ -13,6 +13,7 @@
 #include <linux/of_gpio.h>
 #include <linux/regmap.h>
 #include "google_bms.h"
+#include "gbms_gpio.h"
 #include "max77759.h"
 #include "max77759_charger.h"
 #include "misc/gvotable.h"
@@ -1393,7 +1394,7 @@ static void gs101_setup_default_usecase(struct max77759_usecase_data *uc_data)
 bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 			  struct device_node *node)
 {
-	enum of_gpio_flags flags = 0;
+	bool active_low = false;
 
 	if (!node) {
 		gs101_setup_default_usecase(uc_data);
@@ -1410,10 +1411,10 @@ bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 
 	/* for enabling charging over pogo */
 	if (uc_data->pogo_ovp_en == -EPROBE_DEFER) {
-		uc_data->pogo_ovp_en = of_get_named_gpio_flags(node, "max77759,pogo-ovp-en", 0,
-							       &flags);
+		uc_data->pogo_ovp_en = gbms_of_get_gpio_polarity(node, "max77759,pogo-ovp-en", 0,
+							     &active_low);
 		if (uc_data->pogo_ovp_en >= 0)
-			uc_data->pogo_ovp_en_act_low = (flags & OF_GPIO_ACTIVE_LOW) ? 1 : 0;
+			uc_data->pogo_ovp_en_act_low = active_low;
 	}
 	if (uc_data->pogo_vout_en == -EPROBE_DEFER) {
 		uc_data->pogo_vout_en = of_get_named_gpio(node, "max77759,pogo-vout-sw-en", 0);
