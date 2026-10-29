@@ -12,11 +12,13 @@
  */
 
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <soc/google/cal-if.h>
 #include <soc/google/exynos-devfreq.h>
 #include <soc/google/ect_parser.h>
 #include <dt-bindings/soc/google/zuma-devfreq.h>
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 #include "governor.h"
 #include "governor_memlat.h"
 #include "arm-memlat-mon.h"
@@ -355,7 +357,7 @@ err_data:
 	return ret;
 }
 
-static int gs_memlat_devfreq_remove(struct platform_device *pdev)
+static void gs_memlat_devfreq_remove(struct platform_device *pdev)
 {
 	struct exynos_devfreq_data *data = platform_get_drvdata(pdev);
 
@@ -369,7 +371,6 @@ static int gs_memlat_devfreq_remove(struct platform_device *pdev)
 	mutex_destroy(&data->lock);
 	kfree(data);
 
-	return 0;
 }
 
 static struct platform_device_id gs_memlat_devfreq_driver_ids[] = {
