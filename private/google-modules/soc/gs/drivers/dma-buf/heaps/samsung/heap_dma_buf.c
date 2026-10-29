@@ -22,6 +22,7 @@
 #include <linux/samsung-dma-mapping.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <uapi/linux/dma-buf.h>
 
 #include "dmabuf_heap_trace.h"

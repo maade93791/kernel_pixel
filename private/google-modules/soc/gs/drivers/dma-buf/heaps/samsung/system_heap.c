@@ -16,15 +16,17 @@
 #include <linux/dma-heap.h>
 #include <linux/err.h>
 #include <linux/highmem.h>
+#include <linux/kobject.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/vmalloc.h>
 #include <linux/of.h>
 #include <soc/google/meminfo.h>
 
-#include <heaps/page_pool.h>
+#include "../page_pool.h"
 
 #include "samsung-dma-heap.h"
 
@@ -116,7 +118,7 @@ static void free_dma_heap_page(struct page *page, bool discard)
 }
 
 static struct dma_buf *system_heap_allocate(struct dma_heap *heap, unsigned long len,
-					    unsigned long fd_flags, unsigned long heap_flags)
+					    u32 fd_flags, u64 heap_flags)
 {
 	struct samsung_dma_heap *samsung_dma_heap = dma_heap_get_drvdata(heap);
 	struct samsung_dma_buffer *buffer;
@@ -196,22 +198,8 @@ free_buffer:
 	return ERR_PTR(ret);
 }
 
-static long system_heap_get_pool_size(struct dma_heap *heap)
-{
-	/*
-	 * All system heaps share the same page pool. Return the size of the pool
-	 * only for *the* system heap (required by VTS). Otherwise, the heap pool
-	 * use will be overcalculated by the number of registered system heaps.
-	 */
-	if (strcmp(dma_heap_get_name(heap), "system"))
-		return 0;
-
-	return dma_heap_system_pool_pages() << PAGE_SHIFT;
-}
-
 static const struct dma_heap_ops system_heap_ops = {
 	.allocate = system_heap_allocate,
-	.get_pool_size = system_heap_get_pool_size,
 };
 
 static bool skip_deferred_free;
@@ -284,29 +272,73 @@ static struct meminfo dma_heap_pool_meminfo = {
 	.size_kb = ion_heap_pool_size,
 };
 
+static struct kobject *dma_heap_kobj;
+
+static ssize_t total_pools_kb_show(struct kobject *kobj,
+				 struct kobj_attribute *attr, char *buf)
+{
+	/* Every system heap shares these pools; account for them only once. */
+	return sysfs_emit(buf, "%lu\n", ion_heap_pool_size(NULL));
+}
+
+static struct kobj_attribute total_pools_kb_attr = __ATTR_RO(total_pools_kb);
+
+static void system_heap_sysfs_exit(void)
+{
+	/* Drain show callbacks before the pools or module code can go away. */
+	sysfs_remove_file(dma_heap_kobj, &total_pools_kb_attr.attr);
+	kobject_put(dma_heap_kobj);
+	dma_heap_kobj = NULL;
+}
+
 int __init system_dma_heap_init(void)
 {
-	int i;
+	int i, ret;
 
 	for (i = 0; i < NUM_ORDERS; i++) {
 		pools[i] = dmabuf_page_pool_create(order_flags[i], orders[i]);
 		if (!pools[i]) {
-			int j;
-
 			pr_err("%s: page pool creation failed!\n", __func__);
-			for (j = 0; j < i; j++)
-				dmabuf_page_pool_destroy(pools[j]);
-			return -ENOMEM;
+			ret = -ENOMEM;
+			goto destroy_pools;
 		}
 	}
+
+	dma_heap_kobj = kobject_create_and_add("dma_heap", kernel_kobj);
+	if (!dma_heap_kobj) {
+		ret = -ENOMEM;
+		goto destroy_pools;
+	}
+
+	ret = sysfs_create_file(dma_heap_kobj, &total_pools_kb_attr.attr);
+	if (ret)
+		goto put_kobject;
+
+	ret = platform_driver_register(&system_heap_driver);
+	if (ret)
+		goto remove_sysfs;
 
 	register_meminfo(&dma_heap_meminfo);
 	register_meminfo(&dma_heap_pool_meminfo);
 
-	return platform_driver_register(&system_heap_driver);
+	return 0;
+
+remove_sysfs:
+	system_heap_sysfs_exit();
+	goto destroy_pools;
+put_kobject:
+	kobject_put(dma_heap_kobj);
+	dma_heap_kobj = NULL;
+destroy_pools:
+	while (i-- > 0)
+		dmabuf_page_pool_destroy(pools[i]);
+	return ret;
 }
 
 void system_dma_heap_exit(void)
 {
+	system_heap_sysfs_exit();
+	unregister_meminfo(&dma_heap_pool_meminfo);
+	unregister_meminfo(&dma_heap_meminfo);
 	platform_driver_unregister(&system_heap_driver);
 }
