@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/media/platform/exynos/mfc/mfc_intr.c
  *
@@ -351,7 +352,7 @@ int mfc_core_get_next_ctx(struct mfc_core *core)
 	return next_ctx_index;
 }
 
-int __mfc_dec_ctx_ready_set_bit(struct mfc_core_ctx *core_ctx,
+static int __mfc_dec_ctx_ready_set_bit(struct mfc_core_ctx *core_ctx,
 			struct mfc_bits *data, bool set)
 {
 	struct mfc_core *core = core_ctx->core;

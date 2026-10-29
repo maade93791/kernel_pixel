@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/media/platform/exynos/mfc/mfc.c
  *
@@ -21,6 +22,7 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/poll.h>
+#include <linux/uaccess.h>
 
 #include "mfc_common.h"
 
@@ -81,7 +83,7 @@ extern struct mfc_ctrls_ops decoder_ctrls_ops;
 extern struct vb2_ops mfc_dec_qops;
 extern struct mfc_fmt dec_formats[];
 
-void mfc_butler_worker(struct work_struct *work)
+static void mfc_butler_worker(struct work_struct *work)
 {
 	struct mfc_dev *dev;
 	struct mfc_ctx *ctx;
@@ -420,7 +422,7 @@ static int mfc_open(struct file *file)
 
 	v4l2_fh_init(&ctx->fh, vdev);
 	file->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	ctx->dev = dev;
 
@@ -539,7 +541,7 @@ err_ctx_init:
 	dev->ctx[ctx->num] = 0;
 
 err_ctx_num:
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 
 err_vdev:
@@ -579,7 +581,7 @@ static int mfc_release(struct file *file)
 	MFC_TRACE_CTX_LT("[INFO] release is called (ctx:%d, total:%d)\n", ctx->num, dev->num_inst);
 
 	/* Free resources */
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 
 	maincore = mfc_get_main_core_wait(dev, ctx);
@@ -718,13 +720,84 @@ static int mfc_mmap(struct file *file, struct vm_area_struct *vma)
 	return ret;
 }
 
+/*
+ * MFC's single-control ioctls have different semantics from its extended
+ * controls, including per-frame updates. Keep that HAL ABI after removal of
+ * the legacy v4l2_ioctl_ops callbacks. All other ioctls use the V4L2 core.
+ */
+static long mfc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct video_device *vdev = video_devdata(file);
+	struct mfc_ctx *ctx = fh_to_mfc_ctx(file->private_data);
+	void __user *argp = (void __user *)arg;
+	union {
+		struct v4l2_queryctrl query;
+		struct v4l2_control ctrl;
+	} data = {};
+	size_t input_size, output_size;
+	long ret;
+
+	switch (cmd) {
+	case VIDIOC_QUERYCTRL:
+		/* Like video_ioctl2(), clear everything after the input ID. */
+		input_size = sizeof(data.query.id);
+		output_size = sizeof(data.query);
+		break;
+	case VIDIOC_G_CTRL:
+		input_size = sizeof(data.ctrl.id);
+		output_size = sizeof(data.ctrl);
+		break;
+	case VIDIOC_S_CTRL:
+		input_size = sizeof(data.ctrl);
+		output_size = sizeof(data.ctrl);
+		break;
+	default:
+		return video_ioctl2(file, cmd, arg);
+	}
+
+	/*
+	 * v4l2_compat_ioctl32() already supplies compat_ptr(arg) for these
+	 * standard ioctls. Both fixed-width structures have identical layouts.
+	 */
+	if (copy_from_user(&data, argp, input_size))
+		return -EFAULT;
+
+	if (mutex_lock_interruptible(vdev->lock))
+		return -ERESTARTSYS;
+
+	if (!video_is_registered(vdev)) {
+		ret = -ENODEV;
+		goto unlock;
+	}
+
+	if (cmd == VIDIOC_S_CTRL) {
+		ret = v4l2_prio_check(vdev->prio, ctx->fh.prio);
+		if (ret)
+			goto unlock;
+	}
+
+	if (ctx->type == MFCINST_DECODER)
+		ret = mfc_dec_ctrl_ioctl(file, cmd, &data);
+	else if (ctx->type == MFCINST_ENCODER)
+		ret = mfc_enc_ctrl_ioctl(file, cmd, &data);
+	else
+		ret = -ENOTTY;
+
+unlock:
+	mutex_unlock(vdev->lock);
+	if (!ret && copy_to_user(argp, &data, output_size))
+		return -EFAULT;
+
+	return ret;
+}
+
 /* v4l2 ops */
 static const struct v4l2_file_operations mfc_fops = {
 	.owner = THIS_MODULE,
 	.open = mfc_open,
 	.release = mfc_release,
 	.poll = mfc_poll,
-	.unlocked_ioctl = video_ioctl2,
+	.unlocked_ioctl = mfc_ioctl,
 	.mmap = mfc_mmap,
 };
 
@@ -1200,7 +1273,7 @@ err_res_mem:
 }
 
 /* Remove the driver */
-static int mfc_remove(struct platform_device *pdev)
+static void mfc_remove(struct platform_device *pdev)
 {
 	struct mfc_dev *dev = platform_get_drvdata(pdev);
 
@@ -1228,7 +1301,6 @@ static int mfc_remove(struct platform_device *pdev)
 	mfc_dev_debug(2, "Will now deinit HW\n");
 
 	dev_dbg(&pdev->dev, "%s--\n", __func__);
-	return 0;
 }
 
 static void mfc_shutdown(struct platform_device *pdev)
@@ -1385,4 +1457,4 @@ MODULE_SOFTDEP("pre: samsung_dma_heap");
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kamil Debski <k.debski@samsung.com>");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
