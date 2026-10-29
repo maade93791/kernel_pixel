@@ -23,6 +23,7 @@
 #include <soc/google/cal-if.h>
 #include <dt-bindings/soc/google/gs-bts.h>
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 #if IS_ENABLED(CONFIG_EXYNOS_PM_QOS)
 #include <soc/google/exynos_pm_qos.h>
 #else
@@ -2118,12 +2119,11 @@ static int bts_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int bts_remove(struct platform_device *pdev)
+static void bts_remove(struct platform_device *pdev)
 {
 	devm_kfree(&pdev->dev, btsdev);
 	platform_set_drvdata(pdev, NULL);
 
-	return 0;
 }
 
 /* Device tree compatible information */
