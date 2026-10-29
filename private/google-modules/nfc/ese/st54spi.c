@@ -14,6 +14,7 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/ioctl.h>
 #include <linux/fs.h>
 #include <linux/delay.h>
@@ -894,7 +895,6 @@ static const struct file_operations st54spi_fops = {
 	.compat_ioctl = st54spi_compat_ioctl,
 	.open = st54spi_open,
 	.release = st54spi_release,
-	.llseek = no_llseek,
 };
 
 /*-------------------------------------------------------------------------*/
@@ -1052,7 +1052,7 @@ static int st54spi_probe(struct spi_device *spi)
 	dev_info(&spi->dev, "Loading st54spi driver, major: %d\n",
 		 st54spi_major);
 
-	st54spi_class = class_create(THIS_MODULE, "st54spi");
+	st54spi_class = class_create("st54spi");
 	if (IS_ERR(st54spi_class)) {
 		unregister_chrdev(st54spi_major, "st54spi");
 		return PTR_ERR(st54spi_class);
