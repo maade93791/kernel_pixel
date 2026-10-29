@@ -9,7 +9,6 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
-#include <linux/ktime.h>
 #include <linux/moduleparam.h>
 #include <linux/platform_data/sscoredump.h>
 #include <linux/slab.h>
@@ -382,35 +381,6 @@ static int gxp_copy_sscd_segments(struct gxp_dev *gxp, uint core_id)
 	}
 
 	return 0;
-}
-
-static void gxp_send_to_sscd(struct gxp_dev *gxp, void *segs, int seg_cnt, const char *info)
-{
-	int ret;
-	ktime_t now;
-	uint64_t diff_ms;
-	static ktime_t prev_sscd_report_time;
-	struct gxp_debug_dump_manager *mgr = gxp->debug_dump_mgr;
-	struct sscd_platform_data *pdata = mgr->sscd_pdata;
-
-	if (!pdata || !pdata->sscd_report) {
-		dev_warn(gxp->dev, "Failed to generate coredump\n");
-		return;
-	}
-
-	now = ktime_get();
-	diff_ms = ktime_to_ms(ktime_sub(now, prev_sscd_report_time));
-	if (diff_ms < SSCD_REPORT_WAIT_TIME)
-		msleep(SSCD_REPORT_WAIT_TIME - diff_ms);
-
-	ret = pdata->sscd_report(gxp->debug_dump_mgr->sscd_dev, segs, seg_cnt,
-				 SSCD_FLAGS_ELFARM64HDR, info);
-	if (ret) {
-		dev_warn(gxp->dev, "Unable to send the report to SSCD daemon (ret=%d)\n", ret);
-		return;
-	}
-
-	prev_sscd_report_time = ktime_get();
 }
 
 /*
@@ -1149,7 +1119,7 @@ static int gxp_generate_debug_dump_direct_mode(struct gxp_dev *gxp, struct gxp_v
 	if (ret)
 		goto out;
 
-	gxp_send_to_sscd(gxp, mgr->sscd_segments[core_id].segments,
+	gxp_sscd_report(gxp, mgr->sscd_segments[core_id].segments,
 			 mgr->sscd_segments[core_id].num_segments,
 			 mgr->sscd_segments[core_id].sscd_msg);
 	gxp_user_buffers_vunmap(gxp, vd, core_header);
@@ -1247,7 +1217,7 @@ void gxp_debug_dump_process_dump_mcu_mode(struct gxp_dev *gxp, uint *core_list)
 			continue;
 
 		dev_dbg(gxp->dev, "Passing dump data to SSCD daemon for core %u\n", core);
-		gxp_send_to_sscd(gxp, gxp->debug_dump_mgr->sscd_segments[core].segments,
+		gxp_sscd_report(gxp, gxp->debug_dump_mgr->sscd_segments[core].segments,
 				 gxp->debug_dump_mgr->sscd_segments[core].num_segments,
 				 gxp->debug_dump_mgr->sscd_segments[core].sscd_msg);
 		gxp_free_sscd_segments(gxp, core);
@@ -1322,7 +1292,7 @@ static int gxp_debug_dump_init_core_dump(struct gxp_dev *gxp)
 	return 0;
 }
 
-int gxp_debug_dump_init(struct gxp_dev *gxp, void *sscd_dev, void *sscd_pdata)
+int gxp_debug_dump_init(struct gxp_dev *gxp)
 {
 	struct gxp_debug_dump_manager *mgr;
 	int ret;
@@ -1358,8 +1328,6 @@ int gxp_debug_dump_init(struct gxp_dev *gxp, void *sscd_dev, void *sscd_pdata)
 
 	/* No need for a DMA handle since the carveout is coherent */
 	mgr->debug_dump_dma_handle = 0;
-	mgr->sscd_dev = sscd_dev;
-	mgr->sscd_pdata = sscd_pdata;
 	mutex_init(&mgr->debug_dump_lock);
 
 	debugfs_create_file(DEBUGFS_COREDUMP, 0200, gxp->d_entry, gxp, &debugfs_coredump_fops);
@@ -1636,7 +1604,7 @@ void gxp_debug_dump_report_mcu_crash(struct gxp_dev *gxp, enum gcip_fw_crash_typ
 			 seg_idx, GXP_NUM_SEGMENTS_PER_CORE);
 	}
 
-	gxp_send_to_sscd(gxp, mgr->sscd_segments[GXP_REG_MCU_ID].segments, seg_idx, sscd_msg);
+	gxp_sscd_report(gxp, mgr->sscd_segments[GXP_REG_MCU_ID].segments, seg_idx, sscd_msg);
 
 	mutex_unlock(&mgr->debug_dump_lock);
 }

@@ -395,8 +395,6 @@ struct gxp_debug_dump_manager {
 	/* Start of the MCU dump region. */
 	struct gxp_mcu_dump_region *mcu_dump;
 	struct gxp_common_dump *common_dump;
-	void *sscd_dev;
-	void *sscd_pdata;
 	dma_addr_t debug_dump_dma_handle; /* dma handle for debug dump */
 	/*
 	 * Debug dump lock to ensure only one debug dump is being processed at a
@@ -406,7 +404,10 @@ struct gxp_debug_dump_manager {
 	struct gxp_per_core_sscd_segments sscd_segments[GXP_NUM_DEBUG_DUMP_CORES];
 };
 
-int gxp_debug_dump_init(struct gxp_dev *gxp, void *sscd_dev, void *sscd_pdata);
+/* Serialize the owned SSCD device/data with reporting and unregister. */
+void gxp_sscd_report(struct gxp_dev *gxp, void *segs, int seg_cnt, const char *info);
+
+int gxp_debug_dump_init(struct gxp_dev *gxp);
 void gxp_debug_dump_exit(struct gxp_dev *gxp);
 struct work_struct *gxp_debug_dump_get_notification_handler(struct gxp_dev *gxp,
 							    uint core);

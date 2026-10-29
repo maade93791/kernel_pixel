@@ -88,36 +88,86 @@ static bool check_client_has_available_vd_wakelock(struct gxp_client *client,
 
 #if IS_ENABLED(CONFIG_SUBSYSTEM_COREDUMP)
 
-static struct sscd_platform_data gxp_sscd_pdata;
-
-static void gxp_sscd_release(struct device *dev)
-{
-	pr_debug("%s\n", __func__);
-}
-
-static struct platform_device gxp_sscd_dev = {
-	.name = GXP_DRIVER_NAME,
-	.driver_override = SSCD_NAME,
-	.id = -1,
-	.dev = {
-		.platform_data = &gxp_sscd_pdata,
-		.release = gxp_sscd_release,
-	},
-};
+static struct sscd_platform_data *gxp_sscd_pdata;
+static struct platform_device *gxp_sscd_dev;
+static DEFINE_MUTEX(gxp_sscd_lock);
 
 static void gxp_common_platform_reg_sscd(void)
 {
-	/* Registers SSCD platform device */
-	if (gxp_debug_dump_is_enabled()) {
-		if (platform_device_register(&gxp_sscd_dev))
-			pr_err("Unable to register SSCD platform device\n");
-	}
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
+
+	if (!gxp_debug_dump_is_enabled())
+		return;
+
+	pdev = platform_device_alloc(GXP_DRIVER_NAME, PLATFORM_DEVID_NONE);
+	if (!pdev)
+		goto error;
+
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	mutex_lock(&gxp_sscd_lock);
+	gxp_sscd_dev = pdev;
+	gxp_sscd_pdata = dev_get_platdata(&pdev->dev);
+	mutex_unlock(&gxp_sscd_lock);
+	return;
+
+put_device:
+	platform_device_put(pdev);
+error:
+	pr_err("Unable to register SSCD platform device\n");
 }
 
 static void gxp_common_platform_unreg_sscd(void)
 {
-	if (gxp_debug_dump_is_enabled())
-		platform_device_unregister(&gxp_sscd_dev);
+	mutex_lock(&gxp_sscd_lock);
+	if (gxp_sscd_dev)
+		platform_device_unregister(gxp_sscd_dev);
+	gxp_sscd_dev = NULL;
+	gxp_sscd_pdata = NULL;
+	mutex_unlock(&gxp_sscd_lock);
+}
+
+void gxp_sscd_report(struct gxp_dev *gxp, void *segs, int seg_cnt, const char *info)
+{
+	int ret;
+	ktime_t now;
+	uint64_t diff_ms;
+	static ktime_t prev_sscd_report_time;
+	struct sscd_platform_data *pdata;
+
+	mutex_lock(&gxp_sscd_lock);
+	pdata = gxp_sscd_pdata;
+
+	if (!pdata || !pdata->sscd_report) {
+		dev_warn(gxp->dev, "Failed to generate coredump\n");
+		goto unlock;
+	}
+
+	now = ktime_get();
+	diff_ms = ktime_to_ms(ktime_sub(now, prev_sscd_report_time));
+	if (diff_ms < SSCD_REPORT_WAIT_TIME)
+		msleep(SSCD_REPORT_WAIT_TIME - diff_ms);
+
+	ret = pdata->sscd_report(gxp_sscd_dev, segs, seg_cnt,
+				 SSCD_FLAGS_ELFARM64HDR, info);
+	if (ret) {
+		dev_warn(gxp->dev, "Unable to send the report to SSCD daemon (ret=%d)\n", ret);
+		goto unlock;
+	}
+
+	prev_sscd_report_time = ktime_get();
+unlock:
+	mutex_unlock(&gxp_sscd_lock);
 }
 
 #else /* CONFIG_SUBSYSTEM_COREDUMP */
@@ -128,6 +178,11 @@ static void gxp_common_platform_reg_sscd(void)
 
 static void gxp_common_platform_unreg_sscd(void)
 {
+}
+
+void gxp_sscd_report(struct gxp_dev *gxp, void *segs, int seg_cnt, const char *info)
+{
+	dev_warn(gxp->dev, "Failed to generate coredump\n");
 }
 
 #endif /* CONFIG_SUBSYSTEM_COREDUMP */
@@ -1872,7 +1927,7 @@ static __init int gxp_fs_init(void)
 {
 	int ret;
 
-	gxp_class = class_create(THIS_MODULE, GXP_NAME);
+	gxp_class = class_create(GXP_NAME);
 	if (IS_ERR(gxp_class)) {
 		pr_err(GXP_NAME " error creating gxp class: %ld\n",
 		       PTR_ERR(gxp_class));
@@ -1889,7 +1944,7 @@ static __init int gxp_fs_init(void)
 	return 0;
 }
 
-static __exit void gxp_fs_exit(void)
+static void gxp_fs_exit(void)
 {
 	unregister_chrdev_region(gxp_base_devno, GXP_DEV_COUNT);
 	class_destroy(gxp_class);
@@ -2043,11 +2098,7 @@ static int gxp_common_platform_probe(struct platform_device *pdev, struct gxp_de
 			goto err_dma_fence_destroy;
 	}
 
-#if IS_ENABLED(CONFIG_SUBSYSTEM_COREDUMP)
-	ret = gxp_debug_dump_init(gxp, &gxp_sscd_dev, &gxp_sscd_pdata);
-#else
-	ret = gxp_debug_dump_init(gxp, NULL, NULL);
-#endif /* !CONFIG_SUBSYSTEM_COREDUMP */
+	ret = gxp_debug_dump_init(gxp);
 	if (ret)
 		dev_warn(dev, "Failed to initialize debug dump\n");
 
@@ -2061,6 +2112,9 @@ static int gxp_common_platform_probe(struct platform_device *pdev, struct gxp_de
 	return 0;
 
 err_before_remove:
+	/* Retain dump storage until queued reports and the debugfs VD stop. */
+	gxp_debug_dump_quiesce(gxp);
+	gxp_fw_quiesce_debugfs_client(gxp);
 	gxp_debug_dump_exit(gxp);
 	if (gxp->before_remove)
 		gxp->before_remove(gxp);
@@ -2105,6 +2159,9 @@ static void gxp_common_platform_remove(struct platform_device *pdev)
 	 */
 	gcip_pm_flush_put_work(gxp->power_mgr->pm);
 	gxp_device_remove(gxp);
+	/* Retain dump storage until queued reports and the debugfs VD stop. */
+	gxp_debug_dump_quiesce(gxp);
+	gxp_fw_quiesce_debugfs_client(gxp);
 	gxp_debug_dump_exit(gxp);
 	if (gxp->before_remove)
 		gxp->before_remove(gxp);
@@ -2129,11 +2186,15 @@ static void gxp_common_platform_remove(struct platform_device *pdev)
 
 static int __init gxp_common_platform_init(void)
 {
+	int ret = gxp_fs_init();
+
+	if (ret)
+		return ret;
 	gxp_common_platform_reg_sscd();
-	return gxp_fs_init();
+	return 0;
 }
 
-static void __exit gxp_common_platform_exit(void)
+static void gxp_common_platform_exit(void)
 {
 	gxp_fs_exit();
 	gxp_common_platform_unreg_sscd();
