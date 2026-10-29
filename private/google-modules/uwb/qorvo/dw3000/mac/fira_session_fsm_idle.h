@@ -26,6 +26,9 @@
 
 #include "fira_session_fsm.h"
 
+int fira_session_fsm_idle_check_parameters(const struct fira_session *session,
+					   struct nlattr **attrs);
+
 extern const struct fira_session_fsm_state fira_session_fsm_idle;
 
 #endif /* NET_MCPS802154_FIRA_SESSION_FSM_IDLE_H */

@@ -23,6 +23,16 @@
 #ifndef __DW3000_MCPS_H
 #define __DW3000_MCPS_H
 
+#include <linux/types.h>
+
+struct mcps802154_llhw;
+struct mcps802154_hrp_uwb_params;
+
+int set_channel(struct mcps802154_llhw *llhw, u8 page, u8 channel,
+		u8 preamble_code);
+int set_hrp_uwb_params(struct mcps802154_llhw *llhw,
+		       const struct mcps802154_hrp_uwb_params *params);
+
 struct dw3000 *dw3000_mcps_alloc(struct device *dev);
 int dw3000_mcps_register(struct dw3000 *dw);
 void dw3000_mcps_unregister(struct dw3000 *dw);

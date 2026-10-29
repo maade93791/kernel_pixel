@@ -331,4 +331,15 @@ int mcps802154_vendor_cmd(struct mcps802154_llhw *llhw, u32 vendor_id,
 int mcps802154_rx_get_measurement(struct mcps802154_llhw *llhw, void *rx_ctx,
 				  struct mcps802154_rx_measurement_info *info);
 
+/**
+ * mcps802154_check_hrp_uwb_params() - Check hardware support for HRP parameters.
+ * @llhw: Low-level device pointer.
+ * @hrp_uwb_params: Parameters to validate.
+ *
+ * Return: 0 or error.
+ */
+int mcps802154_check_hrp_uwb_params(
+	struct mcps802154_llhw *llhw,
+	const struct mcps802154_hrp_uwb_params *hrp_uwb_params);
+
 #endif /* NET_MCPS802154_FRAME_H */

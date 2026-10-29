@@ -26,6 +26,7 @@
 #if !defined(__DW3000_TRACE) || defined(TRACE_HEADER_MULTI_READ)
 #define __DW3000_TRACE
 
+#include <linux/string.h>
 #include <linux/tracepoint.h>
 #include <linux/version.h>
 
@@ -38,7 +39,7 @@
 
 #define MAXNAME 32
 #define DW_ENTRY __array(char, dw_name, MAXNAME)
-#define DW_ASSIGN strlcpy(__entry->dw_name, dw->dev->kobj.name, MAXNAME)
+#define DW_ASSIGN strscpy(__entry->dw_name, dw->dev->kobj.name, MAXNAME)
 #define DW_PR_FMT "%s"
 #define DW_PR_ARG __entry->dw_name
 
@@ -1340,7 +1341,7 @@ TRACE_EVENT(dw3000_nfcc_coex_err,
 	),
 	TP_fast_assign(
 		DW_ASSIGN;
-		__assign_str(err, err);
+		__assign_str(err);
 	),
 	TP_printk(DW_PR_FMT ", err: \"%s\"", DW_PR_ARG, __get_str(err))
 );
@@ -1354,7 +1355,7 @@ TRACE_EVENT(dw3000_nfcc_coex_warn,
 	),
 	TP_fast_assign(
 		DW_ASSIGN;
-		__assign_str(warn, warn);
+		__assign_str(warn);
 	),
 	TP_printk(DW_PR_FMT ", warn: \"%s\"", DW_PR_ARG, __get_str(warn))
 );
