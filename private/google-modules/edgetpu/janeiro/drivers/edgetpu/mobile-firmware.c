@@ -10,6 +10,7 @@
 #include <linux/firmware.h>
 #include <linux/gsa/gsa_tpu.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/string.h>
 #include <linux/types.h>
 

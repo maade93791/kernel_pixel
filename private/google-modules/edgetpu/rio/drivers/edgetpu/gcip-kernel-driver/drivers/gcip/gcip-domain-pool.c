@@ -53,9 +53,7 @@ int gcip_domain_pool_init(struct gcip_domain_pool *pool, struct device *dev, int
 	xa_init(&pool->domain_xa);
 
 	for (i = 0; i < size; i++) {
-		domain = iommu_domain_alloc(dev->bus);
-		if (!domain)
-			domain = ERR_PTR(-ENOMEM);
+		domain = iommu_paging_domain_alloc_flags(dev, IOMMU_HWPT_ALLOC_PASID);
 		if (IS_ERR(domain)) {
 			dev_err(pool->dev, "Failed to allocate iommu domain %d of %u\n", i + 1,
 				size);
@@ -156,7 +154,7 @@ int gcip_domain_pool_attach(struct gcip_domain_pool *pool, struct gcip_iommu_dom
 	if (pasid < 0)
 		return pasid;
 
-	ret = iommu_attach_device_pasid(gdomain->domain, pool->dev, pasid);
+	ret = iommu_attach_device_pasid(gdomain->domain, pool->dev, pasid, NULL);
 	if (ret) {
 		ida_free(&pool->pasid_pool, pasid);
 		return ret;

@@ -10,6 +10,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/idr.h>
 #include <linux/iommu.h>
+#include <soc/google/samsung-iommu.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/types.h>
@@ -105,12 +106,12 @@ get_domain_by_context_id(struct edgetpu_dev *etdev,
 	return domain;
 }
 
-static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault,
+static int edgetpu_iommu_dev_fault_handler(const struct samsung_iommu_fault *fault,
 					   void *token)
 {
 	struct edgetpu_dev *etdev = (struct edgetpu_dev *)token;
 
-	if (fault->type == IOMMU_FAULT_DMA_UNRECOV) {
+	if (fault->type == SAMSUNG_IOMMU_FAULT_DMA_UNRECOV) {
 		etdev_warn(etdev, "Unrecoverable IOMMU fault!\n");
 		etdev_warn(etdev, "Reason = %08X\n", fault->event.reason);
 		etdev_warn(etdev, "flags = %08X\n", fault->event.flags);
@@ -118,13 +119,12 @@ static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault,
 		etdev_warn(etdev, "perms = %08X\n", fault->event.perm);
 		etdev_warn(etdev, "addr = %llX\n", fault->event.addr);
 		etdev_warn(etdev, "fetch_addr = %llX\n", fault->event.fetch_addr);
-	} else if (fault->type == IOMMU_FAULT_PAGE_REQ) {
+	} else if (fault->type == SAMSUNG_IOMMU_FAULT_PAGE_REQ) {
 		etdev_dbg(etdev, "IOMMU page request fault!\n");
-		etdev_dbg(etdev, "flags = %08X\n", fault->prm.flags);
-		etdev_dbg(etdev, "pasid = %08X\n", fault->prm.pasid);
-		etdev_dbg(etdev, "grpid = %08X\n", fault->prm.grpid);
-		etdev_dbg(etdev, "perms = %08X\n", fault->prm.perm);
-		etdev_dbg(etdev, "addr = %llX\n", fault->prm.addr);
+		etdev_dbg(etdev, "flags = %08X\n", fault->event.flags);
+		etdev_dbg(etdev, "pasid = %08X\n", fault->event.pasid);
+		etdev_dbg(etdev, "perms = %08X\n", fault->event.perm);
+		etdev_dbg(etdev, "addr = %llX\n", fault->event.addr);
 	}
 	// Tell the IOMMU driver to carry on
 	return -EAGAIN;
@@ -133,14 +133,14 @@ static int edgetpu_iommu_dev_fault_handler(struct iommu_fault *fault,
 static int edgetpu_register_iommu_device_fault_handler(struct edgetpu_dev *etdev)
 {
 	etdev_dbg(etdev, "Registering IOMMU device fault handler\n");
-	return iommu_register_device_fault_handler(etdev->dev, edgetpu_iommu_dev_fault_handler,
+	return samsung_iommu_register_fault_handler(etdev->dev, edgetpu_iommu_dev_fault_handler,
 						   etdev);
 }
 
 static int edgetpu_unregister_iommu_device_fault_handler(struct edgetpu_dev *etdev)
 {
 	etdev_dbg(etdev, "Unregistering IOMMU device fault handler\n");
-	return iommu_unregister_device_fault_handler(etdev->dev);
+	return samsung_iommu_unregister_fault_handler(etdev->dev);
 }
 
 /* A callback for idr_for_each to release the domains */
@@ -379,7 +379,8 @@ int edgetpu_mmu_map(struct edgetpu_dev *etdev, struct edgetpu_mapping *map,
 	 */
 	if (params.domain != default_domain) {
 		ssize_t mapped = (ssize_t)iommu_map_sg(params.domain, iova, map->sgt.sgl,
-						       map->sgt.orig_nents, params.prot);
+						       map->sgt.orig_nents, params.prot,
+						       GFP_KERNEL);
 
 		/* iommu_map_sg returns 0 on failure before 5.15, returns -errno afterwards */
 		if (mapped <= 0) {
@@ -490,7 +491,7 @@ int edgetpu_mmu_add_translation(struct edgetpu_dev *etdev, unsigned long iova,
 		return -ENODEV;
 	etdev_dbg(etdev, "%s: ctx=%x iova=%pad paddr=%pap size=%#zx prot=%#x\n",
 		  __func__, context_id, &iova, &paddr, size, prot);
-	return iommu_map(domain, iova, paddr, size, prot);
+	return iommu_map(domain, iova, paddr, size, prot, GFP_KERNEL);
 }
 
 void edgetpu_mmu_remove_translation(struct edgetpu_dev *etdev,
@@ -535,7 +536,7 @@ tpu_addr_t edgetpu_mmu_tpu_map(struct edgetpu_dev *etdev, dma_addr_t down_addr,
 	etdev_dbg(etdev, "%s: ctx=%x iova=%pad size=%zx flags=%#x\n",
 		  __func__, context_id, &down_addr, size, mmu_flags);
 	/* Map the address to the context-specific domain */
-	if (iommu_map(domain, down_addr, paddr, size, prot))
+	if (iommu_map(domain, down_addr, paddr, size, prot, GFP_KERNEL))
 		return 0;
 
 	/* Return downstream IOMMU DMA address as TPU address. */
@@ -601,7 +602,7 @@ tpu_addr_t edgetpu_mmu_tpu_map_sgt(struct edgetpu_dev *etdev,
 		/* ignore sg->offset */
 		paddr =  page_to_phys(sg_page(sg));
 		size = sg->length + sg->offset;
-		ret = iommu_map(domain, cur_iova, paddr, size, prot);
+		ret = iommu_map(domain, cur_iova, paddr, size, prot, GFP_KERNEL);
 		if (ret)
 			goto rollback;
 		cur_iova += size;

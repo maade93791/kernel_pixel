@@ -331,7 +331,7 @@ void edgetpu_debug_dump_cpu_regs(struct edgetpu_dev *etdev)
 		return;
 
 	/* Ensure the TPU block and control cluster are powered. */
-	if (pm_runtime_get_if_active(etdev->dev, false) <= 0) {
+	if (pm_runtime_get_if_in_use(etdev->dev) <= 0) {
 		etdev_info(etdev, "pm_runtime not active, skip CPU registers dump.");
 		return;
 	}
@@ -372,6 +372,8 @@ err_rpm_put:
  * coredump_<SUBSYSTEM_NAME>_<%Y-%m-%d_%H-%M-%S>.bin.
  */
 #define SSCD_REPORT_WAIT_TIME (1000ULL)
+
+static DEFINE_MUTEX(sscd_lock);
 
 #define SET_FIELD(info, obj, __field) ((info)->__field = (obj)->__field)
 
@@ -417,7 +419,7 @@ static int sscd_ctx_init(struct sscd_segments_context *ctx, struct mobile_sscd_i
 {
 	struct sscd_platform_data *pdata = sscd_info->pdata;
 
-	if (!pdata->sscd_report)
+	if (!pdata || !pdata->sscd_report)
 		return -ENOENT;
 	ctx->n_segs = 0;
 	ctx->capacity = 0;
@@ -500,11 +502,6 @@ static int sscd_ctx_report_and_release(struct sscd_segments_context *ctx, const 
 	return ret;
 }
 
-static void sscd_release(struct device *dev)
-{
-	pr_debug(DRIVER_NAME " release\n");
-}
-
 static int mobile_sscd_collect_etdev_info(struct edgetpu_dev *etdev,
 					  struct sscd_segments_context *ctx)
 {
@@ -545,6 +542,7 @@ static int mobile_sscd_generate_dump(struct edgetpu_dev *etdev)
 	static const char crash_info[] = "[edgetpu dump]";
 	int i, ret;
 
+	mutex_lock(&sscd_lock);
 	pdev = to_mobile_dev(etdev);
 	ret = sscd_ctx_init(&sscd_ctx, &pdev->sscd_info);
 	if (ret)
@@ -571,11 +569,13 @@ static int mobile_sscd_generate_dump(struct edgetpu_dev *etdev)
 	if (ret)
 		goto err;
 
+	mutex_unlock(&sscd_lock);
 	return 0;
 
 err_release:
 	sscd_ctx_release(&sscd_ctx);
 err:
+	mutex_unlock(&sscd_lock);
 	etdev_warn(etdev, "failed to generate dump: %d", ret);
 	return ret;
 }
@@ -592,50 +592,52 @@ void edgetpu_debug_dump(struct edgetpu_dev *etdev, u64 dump_reason)
 static int edgetpu_debug_dump_init(struct edgetpu_dev *etdev)
 {
 	struct edgetpu_mobile_platform_dev *pdev = to_mobile_dev(etdev);
+	struct sscd_platform_data pdata = {};
 	struct platform_device *sscd_dev;
-	struct sscd_platform_data *sscd_pdata;
 	int ret;
 
-	sscd_pdata = devm_kzalloc(etdev->dev, sizeof(*sscd_pdata), GFP_KERNEL);
-	if (!sscd_pdata)
+	sscd_dev = platform_device_alloc(DRIVER_NAME, PLATFORM_DEVID_NONE);
+	if (!sscd_dev)
 		return -ENOMEM;
 
-	sscd_dev = devm_kzalloc(etdev->dev, sizeof(*sscd_dev), GFP_KERNEL);
-	if (!sscd_dev) {
-		ret = -ENOMEM;
-		goto out_free_pdata;
-	}
+	sscd_dev->dev.init_name = DRIVER_NAME;
+	ret = platform_device_add_data(sscd_dev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
 
-	*sscd_dev = (struct platform_device) {
-		.name = DRIVER_NAME,
-		.driver_override = SSCD_NAME,
-		.id = PLATFORM_DEVID_NONE,
-		.dev = {
-			.platform_data = sscd_pdata,
-			.release = sscd_release,
-		},
-	};
-	/* Register SSCD platform device */
-	ret = platform_device_register(sscd_dev);
+	ret = device_set_driver_override(&sscd_dev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	/* Register SSCD platform device. */
+	ret = platform_device_add(sscd_dev);
 	if (ret) {
 		etdev_err(etdev, "SSCD platform device registration failed: %d", ret);
-		goto out_free_sscd_dev;
+		goto put_device;
 	}
-	pdev->sscd_info.pdata = sscd_pdata;
+	mutex_lock(&sscd_lock);
+	pdev->sscd_info.pdata = dev_get_platdata(&sscd_dev->dev);
 	pdev->sscd_info.dev = sscd_dev;
+	mutex_unlock(&sscd_lock);
 	edgetpu_setup_debug_dump_fs(etdev);
-	return ret;
+	return 0;
 
-out_free_sscd_dev:
-	devm_kfree(etdev->dev, sscd_dev);
-out_free_pdata:
-	devm_kfree(etdev->dev, sscd_pdata);
+put_device:
+	platform_device_put(sscd_dev);
 	return ret;
 }
 
 static void edgetpu_debug_dump_exit(struct edgetpu_dev *etdev)
 {
-	platform_device_unregister(to_mobile_dev(etdev)->sscd_info.dev);
+	struct mobile_sscd_info *sscd_info = &to_mobile_dev(etdev)->sscd_info;
+
+	/* Keep the report context valid through segment collection and reporting. */
+	mutex_lock(&sscd_lock);
+	if (sscd_info->dev)
+		platform_device_unregister(sscd_info->dev);
+	sscd_info->dev = NULL;
+	sscd_info->pdata = NULL;
+	mutex_unlock(&sscd_lock);
 }
 
 #else /* IS_ENABLED(CONFIG_SUBSYSTEM_COREDUMP) || IS_ENABLED(CONFIG_EDGETPU_TEST) */
