@@ -42,5 +42,6 @@ struct ufs_pixel_fips_info {
 int ufs_pixel_fips_verify(struct ufs_hba *hba);
 
 const struct ufs_pixel_fips_info *ufs_pixel_fips_get_info(struct ufs_hba *hba);
+void ufs_report_ise_version_once(struct ufs_hba *hba);
 
 #endif

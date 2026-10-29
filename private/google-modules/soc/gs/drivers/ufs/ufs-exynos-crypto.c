@@ -247,7 +247,7 @@ static int exynos_crypto_init(struct ufs_hba *hba)
 	bool register_fips_module;
 
 	/* Override the PRDT entry size to include the extra crypto fields. */
-	hba->sg_entry_size = sizeof(struct pixel_ufs_prdt_entry);
+	ufshcd_set_sg_entry_size(hba, sizeof(struct pixel_ufs_prdt_entry));
 
 	err = pixel_ufs_crypto_configure_hw(hba);
 	if (err)

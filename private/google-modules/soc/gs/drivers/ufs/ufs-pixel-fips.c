@@ -8,7 +8,7 @@
  *
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <crypto/aes.h>
 #include <crypto/algapi.h>
 #include <linux/delay.h>
@@ -57,11 +57,6 @@ MODULE_PARM_DESC(
 #define UFS_PIXEL_BUFFER_SIZE		(4096)
 #define UFS_PIXEL_CRYPTO_DATA_UNIT_SIZE (4096)
 #define UFS_PIXEL_MASTER_KEY_INDEX	(15)
-#define UTRD_CMD_TYPE_UFS_STORAGE	(1 << 28)
-#define UTRD_DD_SYSTEM_TO_DEVICE	(1 << 25) /* Write */
-#define UTRD_DD_DEVICE_TO_SYSTEM	(1 << 26) /* Read */
-#define UTRD_CRYPTO_DISABLE		(0)
-#define UTRD_CRYPTO_ENABLE		(1 << 23)
 #define PRDT_FAS_XTS			(2 << 28) /* File Algorithm Selector */
 #define PRDT_FKL_256			(1 << 26) /* File Key Length */
 #define SENSE_DATA_ALLOC_LEN		(18)
@@ -241,7 +236,7 @@ static void ufs_pixel_fips_crypto_fill_prdt_sw_key_mode(void *unused,
 	if (!bc)
 		return;
 
-	key = bc->bc_key->raw;
+	key = bc->bc_key->bytes;
 	tweak_key = key + AES_KEYSIZE_256;
 	dun_lo = bc->bc_dun[0];
 	dun_hi = bc->bc_dun[1];
@@ -293,22 +288,20 @@ static void ufs_pixel_fips_crypto_fill_prdt_sw_key_mode(void *unused,
 static void ufs_pixel_fips_build_utrd(struct ufs_hba *hba,
 				      struct utp_transfer_req_desc *utrd,
 				      struct fips_buffer_info *bi,
-				      u32 data_direction)
+				      enum utp_data_direction data_direction)
 {
 	dma_addr_t ucd_dma_addr = bi->ucd_dma_addr;
 	u16 response_offset =
 		offsetof(struct utp_transfer_cmd_desc, response_upiu);
 	u16 prdt_offset = offsetof(struct utp_transfer_cmd_desc, prd_table);
 	u16 prdt_length = sizeof(struct pixel_ufs_prdt_entry);
-	u32 crypto = bi->iv ? UTRD_CRYPTO_ENABLE : UTRD_CRYPTO_DISABLE;
 
 	memset(utrd, 0, sizeof(struct utp_transfer_req_desc));
 
-	utrd->header.dword_0 = cpu_to_le32(UTRD_CMD_TYPE_UFS_STORAGE |
-					   data_direction | crypto);
-	utrd->header.dword_1 = 0;
-	utrd->header.dword_2 = cpu_to_le32(OCS_INVALID_COMMAND_STATUS);
-	utrd->header.dword_3 = 0;
+	utrd->header.command_type = UTP_CMD_TYPE_UFS_STORAGE;
+	utrd->header.data_direction = data_direction;
+	utrd->header.enable_crypto = !!bi->iv;
+	utrd->header.ocs = OCS_INVALID_COMMAND_STATUS;
 
 	utrd->command_desc_base_addr = cpu_to_le64(ucd_dma_addr);
 
@@ -386,10 +379,12 @@ static void ufs_pixel_fips_build_upiu(struct ufs_hba *hba,
 	struct utp_upiu_req *ucd_req_ptr =
 		(struct utp_upiu_req *)ucd_addr->command_upiu;
 
-	ucd_req_ptr->header.dword_0 = UPIU_HEADER_DWORD(
-		UPIU_TRANSACTION_COMMAND, flags, lun, task_tag);
-	ucd_req_ptr->header.dword_1 = 0;
-	ucd_req_ptr->header.dword_2 = 0;
+	ucd_req_ptr->header = (struct utp_upiu_header) {
+		.transaction_code = UPIU_TRANSACTION_COMMAND,
+		.flags = flags,
+		.lun = lun,
+		.task_tag = task_tag,
+	};
 	ucd_req_ptr->sc.exp_data_transfer_len = cpu_to_be32(buffer_len);
 	memcpy(ucd_req_ptr->sc.cdb, cdb, sizeof(struct scsi_cdb));
 }
@@ -443,8 +438,8 @@ static int ufs_pixel_fips_send_utrd(struct ufs_hba *hba,
 
 static int ufs_pixel_fips_check_response(struct utp_upiu_rsp *resp, u8 ocs)
 {
-	u8 status = be32_to_cpu(resp->header.dword_1);
-	u8 response = be32_to_cpu(resp->header.dword_1) >> 8;
+	u8 status = resp->header.status;
+	u8 response = resp->header.response;
 	if (ocs || status || response) {
 		uint8_t response_code = resp->sr.sense_data[0] & 0x7F;
 		if (response_code == 0x70) {
@@ -465,7 +460,7 @@ static int ufs_pixel_fips_check_response(struct utp_upiu_rsp *resp, u8 ocs)
 	return 0;
 }
 
-int ufs_pixel_fips_send_request(struct ufs_hba *hba, struct scsi_cdb *cdb,
+static int ufs_pixel_fips_send_request(struct ufs_hba *hba, struct scsi_cdb *cdb,
 				struct fips_buffer_info *bi, u32 buffer_len,
 				u32 lu)
 {
@@ -474,7 +469,7 @@ int ufs_pixel_fips_send_request(struct ufs_hba *hba, struct scsi_cdb *cdb,
 		(struct utp_upiu_rsp *)bi->ucd_addr->response_upiu;
 	u8 task_tag = 0x7;
 	u8 ocs;
-	u32 data_direction;
+	enum utp_data_direction data_direction;
 	u32 flags;
 	int ret;
 
@@ -483,15 +478,15 @@ int ufs_pixel_fips_send_request(struct ufs_hba *hba, struct scsi_cdb *cdb,
 	/* Build CDB */
 	switch (cdb->op_code) {
 	case REQUEST_SENSE:
-		data_direction = UTRD_DD_DEVICE_TO_SYSTEM;
+		data_direction = UTP_DEVICE_TO_HOST;
 		flags = UPIU_CMD_FLAGS_READ;
 		break;
 	case READ_10:
-		data_direction = UTRD_DD_DEVICE_TO_SYSTEM;
+		data_direction = UTP_DEVICE_TO_HOST;
 		flags = UPIU_CMD_FLAGS_READ;
 		break;
 	case WRITE_10:
-		data_direction = UTRD_DD_SYSTEM_TO_DEVICE;
+		data_direction = UTP_HOST_TO_DEVICE;
 		flags = UPIU_CMD_FLAGS_WRITE;
 		break;
 	default:
@@ -517,7 +512,7 @@ int ufs_pixel_fips_send_request(struct ufs_hba *hba, struct scsi_cdb *cdb,
 	if (ret)
 		return ret;
 
-	ocs = le32_to_cpu(utrd.header.dword_2) & 0xFF;
+	ocs = utrd.header.ocs;
 
 	return ufs_pixel_fips_check_response(resp_upiu, ocs);
 }
@@ -683,7 +678,7 @@ int ufs_pixel_fips_verify(struct ufs_hba *hba)
 	 * Enable clocks, exit hibern8, set link as active
 	 * Will release on function exit
 	 */
-	ufshcd_hold(hba, false);
+	ufshcd_hold(hba);
 
 	/*
 	 * Disable all interrupts except UTP Transfer Request Completion
