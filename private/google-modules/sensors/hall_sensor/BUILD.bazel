@@ -4,10 +4,10 @@ load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
 
 kernel_module(
     name = "hall_sensor",
-    srcs = glob([
-        "**/*.c",
-        "**/*.h",
-    ]) + [
+    srcs = glob(["**/*.c"]) + glob(
+        ["**/*.h"],
+        allow_empty = True,
+    ) + [
         "//private/google-modules/soc/gs:gs_soc_headers",
     ],
     outs = [
