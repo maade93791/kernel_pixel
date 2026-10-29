@@ -82,7 +82,7 @@ static int slg51000_gpio_get_direction(struct gpio_chip *chip,
 	case SLG51000_SEQ2:
 	case SLG51000_SEQ3:
 	case SLG51000_SEQ4:
-		return GPIOF_DIR_OUT;
+		return GPIO_LINE_DIRECTION_OUT;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -94,7 +94,7 @@ static int slg51000_gpio_get_direction(struct gpio_chip *chip,
 		return ret;
 	}
 
-	return (val & SLG51000_GPIO_DIR_MASK) ? GPIOF_DIR_OUT : GPIOF_DIR_IN;
+	return (val & SLG51000_GPIO_DIR_MASK) ? GPIO_LINE_DIRECTION_OUT : GPIO_LINE_DIRECTION_IN;
 }
 
 static int slg51000_generic_seq_get_direction(struct gpio_chip *chip,
@@ -109,7 +109,7 @@ static int slg51000_generic_seq_get_direction(struct gpio_chip *chip,
 	case SLG51000_GENERIC_SEQ5:
 	case SLG51000_GENERIC_SEQ6:
 	case SLG51000_GENERIC_SEQ7:
-		return GPIOF_DIR_OUT;
+		return GPIO_LINE_DIRECTION_OUT;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -149,7 +149,7 @@ static int slg51000_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return val;
 }
 
-static void slg51000_gpio_set(struct gpio_chip *chip, unsigned int offset,
+static int slg51000_gpio_set(struct gpio_chip *chip, unsigned int offset,
 			     int value)
 {
 	int ret;
@@ -176,7 +176,8 @@ static void slg51000_gpio_set(struct gpio_chip *chip, unsigned int offset,
 	default:
 		pr_err("Error: %s Unsupported GPIO offset %d\n",
 			__func__, offset);
-		return;
+		ret = -EOPNOTSUPP;
+		goto out;
 	}
 
 	ret = regmap_write(data->regmap, addr, val);
@@ -185,8 +186,10 @@ static void slg51000_gpio_set(struct gpio_chip *chip, unsigned int offset,
 			__func__, offset);
 	}
 
+out:
 	if (data->chip->exit_sw_test_mode)
 		data->chip->exit_sw_test_mode(data->regmap);
+	return ret;
 }
 
 static int slg51000_gpio_seq_get(struct gpio_chip *chip, unsigned int offset)
@@ -205,7 +208,7 @@ static int slg51000_gpio_seq_get(struct gpio_chip *chip, unsigned int offset)
 	return val & slg51000_ctrl_bit_tbl[offset];
 }
 
-static void slg51000_gpio_seq_set(struct gpio_chip *chip, unsigned int offset,
+static int slg51000_gpio_seq_set(struct gpio_chip *chip, unsigned int offset,
 			     int value)
 {
 	int ret;
@@ -219,7 +222,7 @@ static void slg51000_gpio_seq_set(struct gpio_chip *chip, unsigned int offset,
 			__func__, offset);
 	}
 
-	return;
+	return ret;
 }
 
 static int slg51000_generic_seq_get(struct gpio_chip *chip, unsigned int offset)
@@ -238,7 +241,7 @@ static int slg51000_generic_seq_get(struct gpio_chip *chip, unsigned int offset)
 	return val & BIT(offset);
 }
 
-static void slg51000_generic_seq_set(struct gpio_chip *chip,
+static int slg51000_generic_seq_set(struct gpio_chip *chip,
 				unsigned int offset, int value)
 {
 	int ret;
@@ -252,7 +255,7 @@ static void slg51000_generic_seq_set(struct gpio_chip *chip,
 			__func__, offset);
 	}
 
-	return;
+	return ret;
 }
 
 static int slg51000_gpio_direction_input(struct gpio_chip *chip,
@@ -344,7 +347,7 @@ static int slg51000_gpio_direction_output(struct gpio_chip *chip,
 
 out1:
 	if (data->gc.set)
-		data->gc.set(chip, offset, value);
+		ret = data->gc.set(chip, offset, value);
 
 out:
 	if (data->chip->exit_sw_test_mode)
@@ -374,7 +377,7 @@ static int slg51000_generic_seq_direction_output(struct gpio_chip *chip,
 	case SLG51000_GENERIC_SEQ6:
 	case SLG51000_GENERIC_SEQ7:
 		if (data->gc.set)
-			data->gc.set(chip, offset, value);
+			return data->gc.set(chip, offset, value);
 		return 0;
 	default:
 		pr_err("Error: %s Unsupported GPIO offset %d\n",
@@ -442,8 +445,15 @@ static int slg51000_pinconf_set(struct pinctrl_dev *pctldev,
 	return 0;
 }
 
+static void slg51000_pinctrl_put_node(void *data)
+{
+	of_node_put(data);
+}
+
 static int slg51000_pinctrl_probe(struct platform_device *pdev)
 {
+	struct device_node *np;
+
 	int ret;
 	struct slg51000_pinctrl *slg51000_pctl;
 	struct pinctrl_dev *pctl;
@@ -495,17 +505,22 @@ static int slg51000_pinctrl_probe(struct platform_device *pdev)
 
 	slg51000_pctl->gc.base = -1;
 	slg51000_pctl->gc.can_sleep = true;
-	slg51000_pctl->gc.of_node =
-		of_find_node_by_name(pdev->dev.parent->of_node, pdev->name);
+	np = of_find_node_by_name(of_node_get(pdev->dev.parent->of_node),
+				  pdev->name);
 	slg51000_pctl->gc.set_config = gpiochip_generic_config;
 	slg51000_pctl->gc.request = gpiochip_generic_request;
 	slg51000_pctl->gc.free = gpiochip_generic_free;
 
-	if (!slg51000_pctl->gc.of_node) {
+	if (!np) {
 		dev_err(&pdev->dev, "Failed to find %s DT node\n", pdev->name);
 		return -EINVAL;
 	}
-	if (of_property_read_u32(slg51000_pctl->gc.of_node,
+	ret = devm_add_action_or_reset(&pdev->dev, slg51000_pinctrl_put_node, np);
+	if (ret)
+		return ret;
+	slg51000_pctl->gc.fwnode = of_fwnode_handle(np);
+
+	if (of_property_read_u32(np,
 			"ngpios", &ngpios)) {
 		dev_err(&pdev->dev, "Failed to get ngpios from %s DT node\n",
 			pdev->name);
@@ -586,9 +601,8 @@ static int slg51000_pinctrl_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int slg51000_pinctrl_remove(struct platform_device *pdev)
+static void slg51000_pinctrl_remove(struct platform_device *pdev)
 {
-	return 0;
 }
 
 static const struct platform_device_id slg51000_pinctrl_id[] = {
