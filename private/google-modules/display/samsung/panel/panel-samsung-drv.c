@@ -9,11 +9,12 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/debugfs.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sysfs.h>
@@ -276,8 +277,10 @@ static int exynos_panel_parse_gpios(struct exynos_panel *ctx)
 	if (IS_ERR(ctx->vddd_gpio))
 		ctx->vddd_gpio = NULL;
 
-	ctx->ready_signal.gpio = of_get_named_gpio_flags(dev->of_node, "rdy-gpios", 0,
-							 &ctx->ready_signal.gpio_flags);
+	ctx->ready_signal.gpio = devm_gpiod_get_optional(dev, "rdy", GPIOD_IN);
+	if (IS_ERR(ctx->ready_signal.gpio))
+		return dev_err_probe(dev, PTR_ERR(ctx->ready_signal.gpio),
+				     "failed to get rdy-gpios\n");
 
 	dev_dbg(ctx->dev, "%s -\n", __func__);
 	return 0;
@@ -551,7 +554,6 @@ EXPORT_SYMBOL_GPL(exynos_panel_init);
 static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 {
 	ktime_t start_time, end_time;
-	int rdy_active_val;
 	unsigned int timeout_ms;
 	bool panel_ready_detected = false;
 
@@ -565,13 +567,11 @@ static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 	reinit_completion(&ctx->ready_signal.detected);
 	enable_irq(ctx->ready_signal.irq);
 
-	/* expected ready pin active value */
-	rdy_active_val = (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW) == 0;
 	timeout_ms = (ctx->desc && ctx->desc->rdy_timeout_ms) ? ctx->desc->rdy_timeout_ms :
 								PANEL_READY_TIMEOUT_MS;
 
 	/* Check if the ready pin is already ready. If not just wait for the interrupt. */
-	if (gpio_get_value(ctx->ready_signal.gpio) == rdy_active_val ||
+	if (gpiod_get_value_cansleep(ctx->ready_signal.gpio) > 0 ||
 	    wait_for_completion_timeout(&ctx->ready_signal.detected, msecs_to_jiffies(timeout_ms)) >
 		    0)
 		panel_ready_detected = true;
@@ -898,8 +898,8 @@ static int exynos_panel_register_irqs(struct exynos_panel *ctx)
 
 	/* 1: Panel ready */
 	init_completion(&ctx->ready_signal.detected);
-	if (gpio_is_valid(ctx->ready_signal.gpio)) {
-		ret = gpio_to_irq(ctx->ready_signal.gpio);
+	if (ctx->ready_signal.gpio) {
+		ret = gpiod_to_irq(ctx->ready_signal.gpio);
 		if (ret < 0) {
 			dev_err(ctx->dev, "Failed to get irq number for rdy_gpio: %d\n", ret);
 			return ret;
@@ -908,7 +908,7 @@ static int exynos_panel_register_irqs(struct exynos_panel *ctx)
 		irq = ret;
 		irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
 		ret = devm_request_irq(ctx->dev, irq, panel_rdy_irq_handler,
-				       (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW ?
+				       (gpiod_is_active_low(ctx->ready_signal.gpio) ?
 						IRQF_TRIGGER_FALLING :
 						IRQF_TRIGGER_RISING),
 				       pdev->name, ctx);
@@ -920,7 +920,7 @@ static int exynos_panel_register_irqs(struct exynos_panel *ctx)
 
 		ctx->ready_signal.irq = irq;
 		dev_info(ctx->dev, "Request rdy irq number(%d) okay (%sING_TRIGGER)\n", irq,
-			 (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW ? "FALL" : "RIS"));
+			 (gpiod_is_active_low(ctx->ready_signal.gpio) ? "FALL" : "RIS"));
 	} else {
 		/* Panel doesn't have the ready pin */
 		ctx->ready_signal.irq = -ENOENT;
@@ -4115,6 +4115,7 @@ static void exynos_panel_node_attach(struct exynos_drm_connector *exynos_connect
 }
 
 static int exynos_panel_bridge_attach(struct drm_bridge *bridge,
+				      struct drm_encoder *encoder,
 				      enum drm_bridge_attach_flags flags)
 {
 	struct drm_device *dev = bridge->dev;
@@ -4139,7 +4140,7 @@ static int exynos_panel_bridge_attach(struct drm_bridge *bridge,
 
 	drm_connector_helper_add(connector, &exynos_connector_helper_funcs);
 
-	drm_connector_attach_encoder(connector, bridge->encoder);
+	drm_connector_attach_encoder(connector, encoder);
 	connector->funcs->reset(connector);
 	connector->status = connector_status_connected;
 	if (ctx->desc->exynos_panel_func && ctx->desc->exynos_panel_func->commit_done)
@@ -4159,7 +4160,7 @@ static void exynos_panel_bridge_detach(struct drm_bridge *bridge)
 }
 
 static void exynos_panel_bridge_enable(struct drm_bridge *bridge,
-				       struct drm_bridge_state *old_bridge_state)
+				       struct drm_atomic_state *state)
 {
 	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
 	struct dsim_device *dsim = host_to_dsi(to_mipi_dsi_device(ctx->dev)->host);
@@ -4397,7 +4398,7 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 }
 
 static void exynos_panel_bridge_pre_enable(struct drm_bridge *bridge,
-					   struct drm_bridge_state *old_bridge_state)
+					   struct drm_atomic_state *state)
 {
 	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
 
@@ -4412,7 +4413,7 @@ static void exynos_panel_bridge_pre_enable(struct drm_bridge *bridge,
 }
 
 static void exynos_panel_bridge_disable(struct drm_bridge *bridge,
-					struct drm_bridge_state *old_bridge_state)
+					struct drm_atomic_state *state)
 {
 	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
 	const struct drm_connector_state *conn_state = ctx->exynos_connector.base.state;
@@ -4476,7 +4477,7 @@ static void exynos_panel_bridge_disable(struct drm_bridge *bridge,
 }
 
 static void exynos_panel_bridge_post_disable(struct drm_bridge *bridge,
-					     struct drm_bridge_state *old_bridge_state)
+					     struct drm_atomic_state *state)
 {
 	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
 

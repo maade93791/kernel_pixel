@@ -9,6 +9,7 @@
 
 #include "gs_panel/gs_panel.h"
 
+#include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/module.h>

@@ -18,6 +18,7 @@
 #include <linux/sched/clock.h>
 #include <linux/sysfs.h>
 #include <linux/time.h>
+#include <linux/vmalloc.h>
 #include <video/mipi_display.h>
 #include <drm/drm_print.h>
 #include <drm/drm_managed.h>
@@ -1644,10 +1645,24 @@ bool is_console_enabled(void)
 	return exynos_uart_console_enabled();
 }
 
+static void exynos_drm_print_debug(struct drm_printer *p, struct va_format *vaf)
+{
+	printk(KERN_DEBUG "[drm] %pV", vaf);
+}
+
+struct drm_printer exynos_drm_debug_printer(void)
+{
+	struct drm_printer p = {
+		.printfn = exynos_drm_print_debug,
+	};
+
+	return p;
+}
+
 static void buf_dump_all(const struct decon_device *decon)
 {
 	struct drm_printer p = is_console_enabled() ?
-		drm_debug_printer("[drm]") : drm_info_printer(decon->dev);
+		exynos_drm_debug_printer() : drm_info_printer(decon->dev);
 	int i;
 
 	for (i = 0; i < decon->dpp_cnt; ++i)
@@ -2167,7 +2182,7 @@ void decon_dump_event_condition(const struct decon_device *decon,
 		enum dpu_event_condition condition)
 {
 	struct drm_printer p = is_console_enabled() ?
-		drm_debug_printer("[drm]") : drm_info_printer(decon->dev);
+		exynos_drm_debug_printer() : drm_info_printer(decon->dev);
 	u32 print_log_size;
 
 	if (decon_dump_ignore(condition))
