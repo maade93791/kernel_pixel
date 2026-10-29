@@ -24,6 +24,7 @@
 #include <soc/google/exynos_pm_qos.h>
 #include <dt-bindings/soc/google/zuma-devfreq.h>
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 #include "governor.h"
 #include "governor_memlat.h"
 #include "arm-memlat-mon.h"
