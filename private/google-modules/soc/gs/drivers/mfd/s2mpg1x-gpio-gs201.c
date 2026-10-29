@@ -24,7 +24,7 @@
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
-#include <linux/mfd/samsung/s2mpg10.h>
+#include <linux/mfd/samsung/s2mpg10-gs.h>
 #include <linux/mfd/samsung/s2mpg11.h>
 #include <linux/mfd/samsung/s2mpg12.h>
 #include <linux/mfd/samsung/s2mpg13.h>
@@ -108,7 +108,9 @@ static int s2mpg1x_read_gpio_ctrl_bit(struct s2mpg1x_gpio *gc,
 				      unsigned int offset,
 				      unsigned int bit_mask)
 {
-	return s2mpg1x_read_gpio_ctrl_reg(gc, offset) & bit_mask;
+	int ret = s2mpg1x_read_gpio_ctrl_reg(gc, offset);
+
+	return ret < 0 ? ret : ret & bit_mask;
 }
 
 static int s2mpg1x_update_gpio_ctrl_reg(struct s2mpg1x_gpio *gc,
@@ -138,28 +140,39 @@ static int s2mpg1x_gpio_get_direction(struct gpio_chip *chip,
 {
 	struct s2mpg1x_gpio *data = gpiochip_get_data(chip);
 
-	return !s2mpg1x_read_gpio_ctrl_bit(data, offset, GPIO_OEN_MASK);
+	int ret = s2mpg1x_read_gpio_ctrl_bit(data, offset, GPIO_OEN_MASK);
+
+	return ret < 0 ? ret : !ret;
 }
 
 static int s2mpg1x_gpio_get(struct gpio_chip *chip, unsigned int offset)
 {
 	struct s2mpg1x_gpio *data = gpiochip_get_data(chip);
+	int direction = s2mpg1x_gpio_get_direction(chip, offset);
+	int ret;
 
-	if (s2mpg1x_gpio_get_direction(chip, offset))
-		return (s2mpg1x_read_gpio_status_reg(data) >> offset) & 0x1;
-	else
-		return s2mpg1x_read_gpio_ctrl_bit(data, offset,
-						GPIO_OUT_MASK);
+	if (direction < 0)
+		return direction;
+	if (direction == GPIO_LINE_DIRECTION_IN) {
+		ret = s2mpg1x_read_gpio_status_reg(data);
+		return ret < 0 ? ret : (ret >> offset) & 0x1;
+	}
+	ret = s2mpg1x_read_gpio_ctrl_bit(data, offset, GPIO_OUT_MASK);
+	return ret < 0 ? ret : !!ret;
 }
 
-static void s2mpg1x_gpio_set(struct gpio_chip *chip, unsigned int offset,
-			     int value)
+static int s2mpg1x_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			    int value)
 {
 	struct s2mpg1x_gpio *data = gpiochip_get_data(chip);
+	int direction = s2mpg1x_gpio_get_direction(chip, offset);
 
-	if (!s2mpg1x_gpio_get_direction(chip, offset))
-		s2mpg1x_write_gpio_ctrl_bit(data, offset, GPIO_OUT_MASK,
-					    (value & 0x1) << GPIO_OUT_SHIFT);
+	if (direction < 0)
+		return direction;
+	if (direction == GPIO_LINE_DIRECTION_OUT)
+		return s2mpg1x_write_gpio_ctrl_bit(data, offset, GPIO_OUT_MASK,
+					     (value & 0x1) << GPIO_OUT_SHIFT);
+	return 0;
 }
 
 static int s2mpg1x_gpio_direction_input(struct gpio_chip *chip,
@@ -244,7 +257,7 @@ static int s2mpg1x_pinconf_get(struct pinctrl_dev *pctldev, unsigned int pin,
 	case PIN_CONFIG_INPUT_ENABLE:
 		// do nothing
 		break;
-	case PIN_CONFIG_OUTPUT:
+	case PIN_CONFIG_LEVEL:
 		ret = s2mpg1x_read_reg(gc->id, gc->i2c,
 				       GPIO_CTRL_BASE[gc->id] + pin,
 				       &data);
@@ -337,7 +350,7 @@ static int s2mpg1x_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 			if (!argument)
 				return -EINVAL;
 			break;
-		case PIN_CONFIG_OUTPUT:
+		case PIN_CONFIG_LEVEL:
 			data = argument ? GPIO_OUT_MASK : 0;
 			ret = s2mpg1x_update_reg(gc->id, gc->i2c,
 						 GPIO_CTRL_BASE[gc->id] + pin,
@@ -407,8 +420,15 @@ static const char *pinctrl_get_group_name(struct pinctrl_dev *pctldev,
 	return NULL;
 }
 
+static void s2mpg1x_gpio_put_node(void *data)
+{
+	of_node_put(data);
+}
+
 static int s2mpg1x_gpio_probe(struct platform_device *pdev)
 {
+	struct device_node *np;
+
 	int ret;
 	struct s2mpg1x_gpio *s2mpg1x_gpio =
 		devm_kzalloc(&pdev->dev,
@@ -466,17 +486,22 @@ static int s2mpg1x_gpio_probe(struct platform_device *pdev)
 	s2mpg1x_gpio->gc.direction_output = s2mpg1x_gpio_direction_output;
 	s2mpg1x_gpio->gc.base = -1;
 	s2mpg1x_gpio->gc.can_sleep = true;
-	s2mpg1x_gpio->gc.of_node =
-		of_find_node_by_name(pdev->dev.parent->of_node, pdev->name);
+	np = of_find_node_by_name(of_node_get(pdev->dev.parent->of_node),
+				  pdev->name);
 	s2mpg1x_gpio->gc.set_config = gpiochip_generic_config;
 	s2mpg1x_gpio->gc.request = gpiochip_generic_request;
 	s2mpg1x_gpio->gc.free = gpiochip_generic_free;
 
-	if (!s2mpg1x_gpio->gc.of_node) {
+	if (!np) {
 		dev_err(&pdev->dev, "Failed to find %s DT node\n", pdev->name);
 		return -EINVAL;
 	}
-	if (of_property_read_u32(s2mpg1x_gpio->gc.of_node, "ngpios", &ngpios)) {
+	ret = devm_add_action_or_reset(&pdev->dev, s2mpg1x_gpio_put_node, np);
+	if (ret)
+		return ret;
+	s2mpg1x_gpio->gc.fwnode = of_fwnode_handle(np);
+
+	if (of_property_read_u32(np, "ngpios", &ngpios)) {
 		dev_err(&pdev->dev, "Failed to get ngpios from %s DT node\n",
 			pdev->name);
 		return -EINVAL;
@@ -540,9 +565,8 @@ static int s2mpg1x_gpio_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int s2mpg1x_gpio_remove(struct platform_device *pdev)
+static void s2mpg1x_gpio_remove(struct platform_device *pdev)
 {
-	return 0;
 }
 
 static const struct platform_device_id s2mpg1x_gpio_id[] = {
