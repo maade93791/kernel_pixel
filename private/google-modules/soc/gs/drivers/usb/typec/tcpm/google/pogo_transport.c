@@ -552,7 +552,7 @@ free_np:
 	return ret;
 }
 
-static int pogo_transport_remove(struct platform_device *pdev)
+static void pogo_transport_remove(struct platform_device *pdev)
 {
 	struct pogo_transport *pogo_transport = platform_get_drvdata(pdev);
 
@@ -561,8 +561,6 @@ static int pogo_transport_remove(struct platform_device *pdev)
 	power_supply_put(pogo_transport->pogo_psy);
 	kthread_destroy_worker(pogo_transport->wq);
 	logbuffer_unregister(pogo_transport->log);
-
-	return 0;
 }
 
 #define POGO_TRANSPORT_RO_ATTR(_name)                                                           \

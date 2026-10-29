@@ -9,6 +9,8 @@
 #ifndef _XHCI_EXYNOS_H
 #define _XHCI_EXYNOS_H
 
+#include <soc/google/exynos-usb-phy.h>
+
 #define PORTSC_OFFSET		0x430
 #define DIS_RX_DETECT		BIT(9)
 #define USB_CLASS_BILLBOARD	0x11
@@ -75,9 +77,6 @@ struct xhci_exynos_udev_ids {
 	__le16 product;
 };
 
-extern void __iomem *phycon_base_addr;
-extern int exynos_usbdrd_phy_vendor_set(struct phy *phy, int is_enable,
-					int is_cancel);
 extern int dwc3_otg_get_idle_ip_index(void);
 void xhci_exynos_register_notify(void);
 void xhci_exynos_unregister_notify(void);
@@ -85,5 +84,7 @@ void register_bus_suspend_callback(void (*callback)(void *bus_suspend_payload, b
 						    bool suspend),
 				   void *data);
 
+int xhci_exynos_port_power_set(struct xhci_hcd_exynos *exynos, u32 on, u32 prt);
+int xhci_exynos_register_offload_ops(struct xhci_exynos_ops *offload_ops);
 int usb_power_notify_control(int on);
 #endif	/* _XHCI_EXYNOS_H */

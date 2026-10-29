@@ -14,6 +14,7 @@
 
 #include "max77759_helper.h"
 #include "max777x9_contaminant.h"
+#include "max77779_contaminant.h"
 #include "tcpci_max77759.h"
 #include "tcpci_max77779_vendor_reg.h"
 #include "google_tcpci_shim.h"

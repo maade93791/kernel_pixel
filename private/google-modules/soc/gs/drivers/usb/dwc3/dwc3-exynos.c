@@ -506,7 +506,7 @@ int dwc3_exynos_device_event(struct device *dev, bool action)
 	return 0;
 }
 
-bool dwc3_exynos_check_usb_suspend(struct dwc3_otg *dotg)
+static bool dwc3_exynos_check_usb_suspend(struct dwc3_otg *dotg)
 {
 	int wait_counter = 0;
 
@@ -1317,8 +1317,8 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	mutex_init(&exynos->dotg_lock);
 	exynos->usb_data_enabled = true;
 
-	exynos_usbdrd_phy_tune(exynos->dwc->usb2_generic_phy, 0);
-	exynos_usbdrd_phy_tune(exynos->dwc->usb3_generic_phy, 0);
+	exynos_usbdrd_phy_tune(exynos->dwc->usb2_generic_phy[0], 0);
+	exynos_usbdrd_phy_tune(exynos->dwc->usb3_generic_phy[0], 0);
 
 	ret = pm_runtime_put(dev);
 	pm_runtime_allow(dev);
@@ -1366,7 +1366,7 @@ vdd33_err:
 	return ret;
 }
 
-static int dwc3_exynos_remove(struct platform_device *pdev)
+static void dwc3_exynos_remove(struct platform_device *pdev)
 {
 	struct dwc3_exynos	*exynos = platform_get_drvdata(pdev);
 	struct dwc3	*dwc = exynos->dwc;
@@ -1390,8 +1390,6 @@ static int dwc3_exynos_remove(struct platform_device *pdev)
 		dwc3_exynos_clk_disable_unprepare(exynos);
 		pm_runtime_set_suspended(&pdev->dev);
 	}
-
-	return 0;
 }
 
 static void dwc3_exynos_shutdown(struct platform_device *pdev)
