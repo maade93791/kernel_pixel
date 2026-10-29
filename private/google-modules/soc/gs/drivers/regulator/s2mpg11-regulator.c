@@ -336,7 +336,7 @@ static int s2mpg11_pmic_dt_parse_pdata(struct s2mpg11_dev *iodev,
 	}
 
 	/* parse OCP_WARN information */
-	pdata->b2_ocp_warn_pin = of_get_gpio(pmic_np, 0);
+	pdata->b2_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 0);
 	if (pdata->b2_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_ocp_warn_pin < 0: %d\n",
 			pdata->b2_ocp_warn_pin);
@@ -376,7 +376,7 @@ static int s2mpg11_pmic_dt_parse_pdata(struct s2mpg11_dev *iodev,
 	pdata->b2_ocp_warn_lvl = ret ? 0 : val;
 
 	/* parse SOFT_OCP_WARN information */
-	pdata->b2_soft_ocp_warn_pin = of_get_gpio(pmic_np, 1);
+	pdata->b2_soft_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 1);
 	if (pdata->b2_soft_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_soft_ocp_warn_pin < 0: %d\n",
 			pdata->b2_soft_ocp_warn_pin);
@@ -532,7 +532,7 @@ static ssize_t s2mpg11_pmic_write_show(struct device *dev,
 static DEVICE_ATTR_RW(s2mpg11_pmic_write);
 static DEVICE_ATTR_RW(s2mpg11_pmic_read);
 
-int create_s2mpg11_pmic_sysfs(struct s2mpg11_pmic *s2mpg11)
+static int create_s2mpg11_pmic_sysfs(struct s2mpg11_pmic *s2mpg11)
 {
 	struct device *s2mpg11_pmic = s2mpg11->dev;
 	int err = -ENODEV;
@@ -577,7 +577,7 @@ static irqreturn_t s2mpg11_buck_ocp_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-void s2mpg11_ocp_detection_config(struct s2mpg11_pmic *s2mpg11,
+static void s2mpg11_ocp_detection_config(struct s2mpg11_pmic *s2mpg11,
 				  struct s2mpg11_platform_data *pdata)
 {
 	int ret;
@@ -611,7 +611,7 @@ void s2mpg11_ocp_detection_config(struct s2mpg11_pmic *s2mpg11,
 		pr_err("i2c write error setting BUCK_OCP_CTRL7: %d\n", ret);
 }
 
-void s2mpg11_ocp_warn(struct s2mpg11_pmic *s2mpg11,
+static void s2mpg11_ocp_warn(struct s2mpg11_pmic *s2mpg11,
 		      struct s2mpg11_platform_data *pdata)
 {
 	u8 val;
@@ -640,7 +640,7 @@ void s2mpg11_ocp_warn(struct s2mpg11_pmic *s2mpg11,
 		pr_err("i2c write error setting b2s_soft_ocp_warn\n");
 }
 
-void s2mpg11_oi_function(struct s2mpg11_pmic *s2mpg11)
+static void s2mpg11_oi_function(struct s2mpg11_pmic *s2mpg11)
 {
 	/* add OI configuration code if necessary */
 
@@ -768,14 +768,13 @@ static int s2mpg11_pmic_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int s2mpg11_pmic_remove(struct platform_device *pdev)
+static void s2mpg11_pmic_remove(struct platform_device *pdev)
 {
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG_PMIC)
 	struct s2mpg11_pmic *s2mpg11 = platform_get_drvdata(pdev);
 
 	pmic_device_destroy(s2mpg11->dev->devt);
 #endif
-	return 0;
 }
 
 static void s2mpg11_sync_state(struct s2mpg11_pmic *s2mpg11)

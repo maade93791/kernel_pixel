@@ -63,7 +63,7 @@ EXPORT_SYMBOL_GPL(pmic_device_destroy);
 
 static int __init pmic_class_create(void)
 {
-	pmic_class = class_create(THIS_MODULE, "pmic");
+	pmic_class = class_create("pmic");
 
 	if (IS_ERR(pmic_class)) {
 		pr_err("Failed to create class(pmic) %ld\n",
@@ -78,4 +78,3 @@ arch_initcall(pmic_class_create);
 MODULE_DESCRIPTION("pmic sysfs");
 MODULE_AUTHOR("Samsung Electronics");
 MODULE_LICENSE("GPL");
-
