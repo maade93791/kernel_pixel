@@ -34,9 +34,9 @@ endif
 GCIP_DIR=gcip-kernel-driver/drivers/gcip
 
 modules modules_install compile_commands.json:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) W=1 gcip.o
+	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) $(if $(MO),MO=$(MO)/$(GCIP_DIR)) W=1 gcip.o
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) \
 	KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" $(@)
 clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) W=1 $(@)
+	$(MAKE) -C $(KERNEL_SRC) M=$(M)/$(GCIP_DIR) $(if $(MO),MO=$(MO)/$(GCIP_DIR)) W=1 $(@)
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) $(@)
