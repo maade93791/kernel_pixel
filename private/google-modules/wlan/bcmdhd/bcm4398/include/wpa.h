@@ -105,7 +105,7 @@ typedef BWL_PRE_PACKED_STRUCT struct
 		uint8 low;
 		uint8 high;
 	} BWL_POST_PACKED_STRUCT count;
-	wpa_pmkid_t list[BCM_FLEX_ARRAY];
+	wpa_pmkid_t list[];
 } BWL_POST_PACKED_STRUCT wpa_pmkid_list_t;
 
 /* WPA cipher suites */
