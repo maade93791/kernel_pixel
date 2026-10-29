@@ -33,6 +33,7 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 
 #define FPC_TTW_HOLD_TIME 3000
@@ -461,6 +462,11 @@ static irqreturn_t fpc1020_irq_handler(int irq, void *handle)
 	return IRQ_HANDLED;
 }
 
+static void fpc1020_free_gpio(void *data)
+{
+	gpio_free((unsigned long)data);
+}
+
 static int fpc1020_request_named_gpio(struct fpc1020_data *fpc1020,
 	const char *label, int *gpio)
 {
@@ -474,11 +480,15 @@ static int fpc1020_request_named_gpio(struct fpc1020_data *fpc1020,
 	}
 	*gpio = rc;
 
-	rc = devm_gpio_request(dev, *gpio, label);
+	rc = gpio_request(*gpio, label);
 	if (rc) {
 		dev_err(dev, "failed to request gpio %d\n", *gpio);
 		return rc;
 	}
+	rc = devm_add_action_or_reset(dev, fpc1020_free_gpio,
+				       (void *)(unsigned long)*gpio);
+	if (rc)
+		return rc;
 	dev_dbg(dev, "%s %d\n", label, *gpio);
 
 	return 0;
@@ -629,7 +639,7 @@ exit:
 	return rc;
 }
 
-static int fpc1020_remove(struct platform_device *pdev)
+static void fpc1020_remove(struct platform_device *pdev)
 {
 	struct fpc1020_data *fpc1020 = platform_get_drvdata(pdev);
 
@@ -641,7 +651,6 @@ static int fpc1020_remove(struct platform_device *pdev)
 	(void)vreg_setup(fpc1020, "vcc_spi", false);
 	dev_info(&pdev->dev, "%s\n", __func__);
 
-	return 0;
 }
 
 static struct of_device_id fpc1020_of_match[] = {
