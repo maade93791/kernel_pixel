@@ -12,7 +12,7 @@ The project uses **Kleaf**, which is a Bazel-based build system for the Linux ke
 
 ## Key Directories
 - `build/kernel/kleaf`: Kleaf build system source and docs.
-- `common/ack`: Android common kernel source and docs.
+- `common`: Android common kernel source and docs.
 - `private/devices/google`: Configuration for Pixel devices.
 - `private/google-modules`: Kernel modules for Pixel devices.
 
@@ -29,7 +29,7 @@ The project uses **Kleaf**, which is a Bazel-based build system for the Linux ke
     ```
   - Ask the user if you need to know which device configuration to use.
 - **Searching:**
-  - Prioritize searching in `common/ack` and `private/` directories for relevant source code.
+  - Prioritize searching in `common` and `private/` directories for relevant source code.
   - Ignore `out` and `bazel-*`, they are for output files.
 - **Licensing:**
   - **SPDX License Identifier:** Every source file must contain an SPDX-License-Identifier.
@@ -37,7 +37,7 @@ The project uses **Kleaf**, which is a Bazel-based build system for the Linux ke
     - **New Files:**
       - For new code, use `GPL-2.0-only`.
       - For new devicetree or DT binding files, use `GPL-2.0-only OR BSD-2-Clause`.
-    - **Comment Style:** Adhere to `common/ack/Documentation/process/license-rules.rst`:
+    - **Comment Style:** Adhere to `common/Documentation/process/license-rules.rst`:
       - C source (`.c`): `// SPDX-License-Identifier: GPL-2.0-only`
       - C header (`.h`): `/* SPDX-License-Identifier: GPL-2.0-only */`
       - Assembly (`.S`, `.s`): `/* SPDX-License-Identifier: GPL-2.0-only */`
@@ -45,7 +45,7 @@ The project uses **Kleaf**, which is a Bazel-based build system for the Linux ke
       - Documentation (`.rst`): `.. SPDX-License-Identifier: GPL-2.0-only`
       - Device Tree (`.dts`, `.dtsi`): `// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause`
 - **Coding Style:**
-  - **General:** Follow the Linux kernel coding style as described in `common/ack/Documentation/process/coding-style.rst`.
+  - **General:** Follow the Linux kernel coding style as described in `common/Documentation/process/coding-style.rst`.
   - **Indentation:**
     - C (`.c`, `.h`), Assembly (`.S`, `.s`), Device Tree (`.dts`, `.dtsi`), Kconfig, and Makefiles: Use **Tabs** (8 characters).
     - Python (`.py`): Use **4 spaces**.
