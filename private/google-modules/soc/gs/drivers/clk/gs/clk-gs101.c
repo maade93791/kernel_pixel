@@ -9,6 +9,7 @@
 #include <linux/clkdev.h>
 #include <linux/clk-provider.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -1515,7 +1516,7 @@ static const struct of_device_id ext_clk_match[] = {
 	{},
 };
 
-void gs101_vclk_init(void)
+static void gs101_vclk_init(void)
 {
 	/* Common clock init */
 }
