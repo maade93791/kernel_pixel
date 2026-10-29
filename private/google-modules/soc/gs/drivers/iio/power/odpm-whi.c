@@ -285,7 +285,7 @@ static int odpm_io_write_lpf_reg(struct odpm_info *info,
 	return s2mpg1x_meter_set_lpf_coefficient(info->chip.hw_id, info->i2c, ch, data);
 }
 
-int odpm_configure_chip(struct odpm_info *info)
+static int odpm_configure_chip(struct odpm_info *info)
 {
 	int ch;
 	int ret;
@@ -321,7 +321,8 @@ int odpm_configure_chip(struct odpm_info *info)
 }
 
 #if IS_ENABLED(CONFIG_SOC_GS201)
-int odpm_meter_sw_reset(struct odpm_info *info) {
+static int odpm_meter_sw_reset(struct odpm_info *info)
+{
 	u8 mt_trim_reg = '\0';
 
 	if (info->chip.hw_id == ID_S2MPG12)
@@ -336,7 +337,7 @@ int odpm_meter_sw_reset(struct odpm_info *info) {
 }
 #endif
 
-int odpm_configure_start_measurement(struct odpm_info *info)
+static int odpm_configure_start_measurement(struct odpm_info *info)
 {
 	u64 timestamp_capture_ns = 0;
 	int ch;
@@ -369,7 +370,7 @@ int odpm_configure_start_measurement(struct odpm_info *info)
 	return ret;
 }
 
-static enum alarmtimer_restart odpm_alarm_handler(struct alarm *alarm, ktime_t time)
+static void odpm_alarm_handler(struct alarm *alarm, ktime_t time)
 {
 	struct odpm_info *info =
 		container_of(alarm, struct odpm_info, alarmtimer_refresh);
@@ -381,7 +382,6 @@ static enum alarmtimer_restart odpm_alarm_handler(struct alarm *alarm, ktime_t t
 	alarm_start_relative(&info->alarmtimer_refresh,
 			     ms_to_ktime(info->chip.max_refresh_time_ms));
 
-	return ALARMTIMER_NORESTART;
 }
 
 static void odpm_periodic_refresh_work(struct work_struct *work)
@@ -1799,6 +1799,14 @@ static int odpm_remove(struct platform_device *pdev)
 	return ret;
 }
 
+static void odpm_platform_remove(struct platform_device *pdev)
+{
+	int ret = odpm_remove(pdev);
+
+	if (ret < 0)
+		dev_err(&pdev->dev, "ODPM cleanup failed: %d\n", ret);
+}
+
 static void odpm_probe_init_device_specific(struct odpm_info *info, int id)
 {
 	info->chip.hw_id = id;
@@ -2007,7 +2015,7 @@ static struct platform_driver odpm_driver = {
 		   .owner = THIS_MODULE,
 		   },
 	.probe = odpm_probe,
-	.remove = odpm_remove,
+	.remove = odpm_platform_remove,
 	.suspend = odpm_suspend,
 	.resume = odpm_resume,
 	.id_table = odpm_id,
