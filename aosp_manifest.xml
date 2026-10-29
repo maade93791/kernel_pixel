@@ -3,9 +3,9 @@
   <remote name="aosp" fetch="https://android.googlesource.com/" />
   <remote name="grapheneos" fetch="https://github.com/GrapheneOS/" />
   <default revision="android-gs-laguna-6.6-android17-qpr1-beta" remote="aosp" sync-c="true" sync-j="32" />
-  <project name="kernel_build" path="build/kernel" remote="grapheneos"
-    revision="8c24e30c484882ccaa1907c75405a730967c48db"
-    upstream="refs/heads/17" dest-branch="refs/heads/17" groups="dependencies,ddk">
+  <project name="kernel/build" path="build/kernel" remote="aosp"
+    revision="38e2a76ecb0257fe1f27b0078cd9169191601ec7"
+    upstream="main-kernel-2026" dest-branch="main-kernel-2026" groups="dependencies,ddk">
     <linkfile dest="MODULE.bazel" src="kleaf/bzlmod/bazel.MODULE.bazel" />
   </project>
   <project name="kernel_common-6.18" path="common" remote="grapheneos" groups="dependencies"
