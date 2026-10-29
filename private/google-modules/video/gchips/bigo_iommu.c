@@ -9,6 +9,8 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <soc/google/samsung-iommu.h>
+
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/samsung-dma-mapping.h>
@@ -198,7 +200,7 @@ int bigo_dma_sync(struct bigo_buf_sync *sync)
 	return ret;
 }
 
-int bigo_iommu_fault_handler(struct iommu_fault *fault, void *param)
+int bigo_iommu_fault_handler(const struct samsung_iommu_fault *fault, void *param)
 {
 	struct bigo_core *core = (struct bigo_core*)param;
 	struct bufinfo *binfo;
