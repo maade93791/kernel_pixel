@@ -4393,11 +4393,6 @@ static int gcpm_pps_psy_is_writeable(struct power_supply *psy,
 	return 0;
 }
 
-static enum power_supply_usb_type gcpm_pps_usb_types[] = {
-	POWER_SUPPLY_USB_TYPE_UNKNOWN,
-	POWER_SUPPLY_USB_TYPE_PD_PPS
-};
-
 static const struct power_supply_desc gcpm_pps_psy_desc = {
 	.name		= "gcpm_pps",
 	.type		= POWER_SUPPLY_TYPE_UNKNOWN,
@@ -4407,9 +4402,9 @@ static const struct power_supply_desc gcpm_pps_psy_desc = {
 	.property_is_writeable = gcpm_pps_psy_is_writeable,
 	.num_properties	= ARRAY_SIZE(gcpm_pps_psy_properties),
 
-	/* POWER_SUPPLY_PROP_USB_TYPE requires an array of these */
-	.usb_types	= gcpm_pps_usb_types,
-	.num_usb_types	= ARRAY_SIZE(gcpm_pps_usb_types),
+	/* Supported POWER_SUPPLY_PROP_USB_TYPE values. */
+	.usb_types	= BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
+			  BIT(POWER_SUPPLY_USB_TYPE_PD_PPS),
 };
 
 /* ------------------------------------------------------------------------- */
@@ -4688,7 +4683,7 @@ static int google_cpm_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, gcpm);
 
 	psy_cfg.drv_data = gcpm;
-	psy_cfg.of_node = pdev->dev.of_node;
+	psy_cfg.fwnode = of_fwnode_handle(pdev->dev.of_node);
 	gcpm->psy = devm_power_supply_register(gcpm->device,
 					       &gcpm_psy_desc.psy_dsc,
 					       &psy_cfg);
@@ -4710,7 +4705,7 @@ static int google_cpm_probe(struct platform_device *pdev)
 
 	/* gcpm_pps_psy_cfg.of_node is used to find out the snk_pdos */
 	gcpm_pps_psy_cfg.drv_data = gcpm;
-	gcpm_pps_psy_cfg.of_node = pdev->dev.of_node;
+	gcpm_pps_psy_cfg.fwnode = of_fwnode_handle(pdev->dev.of_node);
 	gcpm->pps_psy = devm_power_supply_register(gcpm->device,
 						   &gcpm_pps_psy_desc,
 						   &gcpm_pps_psy_cfg);
@@ -4758,13 +4753,13 @@ static int google_cpm_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int google_cpm_remove(struct platform_device *pdev)
+static void google_cpm_remove(struct platform_device *pdev)
 {
 	struct gcpm_drv *gcpm = platform_get_drvdata(pdev);
 	int i;
 
 	if (!gcpm)
-		return 0;
+		return;
 
 	power_supply_unreg_notifier(&gcpm->chg_nb);
 
@@ -4787,8 +4782,6 @@ static int google_cpm_remove(struct platform_device *pdev)
 		power_supply_put(gcpm->wlc_dc_psy);
 	if (gcpm->log)
 		logbuffer_unregister(gcpm->log);
-
-	return 0;
 }
 
 static void google_cpm_shutdown(struct platform_device *pdev)
