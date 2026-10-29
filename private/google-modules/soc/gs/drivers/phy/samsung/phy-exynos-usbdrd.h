@@ -9,6 +9,7 @@
 #define __PHY_EXYNOS_USBDRD_H__
 
 #include <soc/google/exynos-pd_hsi0.h>
+#include <soc/google/exynos-usb-phy.h>
 
 #include "phy-samsung-usb-cal.h"
 #include "phy-exynos-usb3p1.h"

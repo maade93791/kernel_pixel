@@ -10,6 +10,7 @@
 #include <linux/io.h>
 
 #include "phy-samsung-usb-cal.h"
+#include "phy-exynos-eusb.h"
 
 #include "eusb-con-reg.h"
 #include "eusb-phy-reg.h"
