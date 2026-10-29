@@ -9,6 +9,12 @@
 #ifndef __PCIE_EXYNOS_RC_H
 #define __PCIE_EXYNOS_RC_H
 
+#include <linux/interrupt.h>
+
+struct exynos_pcie_register_event;
+struct notifier_block;
+struct work_struct;
+
 #define MSI_64CAP_MASK	(0x1 << 23)
 #define MSI_CONTROL	0x50
 /* SYSREG NCLKOFF */
@@ -404,4 +410,45 @@ int exynos_pcie_rc_set_outbound_atu(int ch_num, u32 target_addr, u32 offset, u32
 int exynos_pcie_rc_check_link_speed(int ch_num);
 int exynos_pcie_rc_change_link_speed(int ch_num, int target_speed);
 int exynos_pcie_l1_exit(int ch_num);
+
+void s2mpu_get_alignment(dma_addr_t addr, size_t size,
+			 phys_addr_t *align_addr, size_t *align_size);
+void exynos_pcie_set_perst_gpio(int ch_num, bool on);
+void exynos_pcie_set_ready_cto_recovery(int ch_num);
+void exynos_pcie_rc_print_link_history(struct dw_pcie_rp *pp);
+void exynos_pcie_set_skip_config(int ch_num, bool val);
+int exynos_pcie_rc_set_bar(int ch_num, u32 bar_num);
+bool exynos_pcie_is_sysmmu_enabled(int ch_num);
+void exynos_pcie_rc_print_aer_register(int ch_num);
+void exynos_pcie_rc_print_msi_register(int ch_num);
+void exynos_pcie_rc_register_dump(int ch_num);
+void exynos_pcie_rc_dump_link_down_status(int ch_num);
+void exynos_pcie_rc_dump_all_status(int ch_num);
+void exynos_pcie_rc_dislink_work(struct work_struct *work);
+void exynos_pcie_rc_cpl_timeout_work(struct work_struct *work);
+void exynos_pcie_rc_link_recovery_fail_work(struct work_struct *work);
+void exynos_pcie_rc_assert_phy_reset(struct dw_pcie_rp *pp);
+void exynos_pcie_rc_resumed_phydown(struct dw_pcie_rp *pp);
+void exynos_pcie_msi_post_process(struct dw_pcie_rp *pp);
+void exynos_pcie_rc_force_linkdown_work(int ch_num);
+void exynos_pcie_pm_suspend(int ch_num);
+int exynos_pcie_pm_resume(int ch_num);
+bool exynos_pcie_rc_get_sudden_linkdown_state(int ch_num);
+void exynos_pcie_rc_set_sudden_linkdown_state(int ch_num, bool recovery);
+bool exynos_pcie_rc_get_cpl_timeout_state(int ch_num);
+void exynos_pcie_rc_set_cpl_timeout_state(int ch_num, bool recovery);
+int exynos_pcie_poweron(int ch_num, int spd, int width);
+void exynos_pcie_poweroff(int ch_num);
+int exynos_pcie_get_max_link_speed(int ch_num);
+int exynos_pcie_get_max_link_width(int ch_num);
+int exynos_pcie_rc_chk_link_status(int ch_num);
+int exynos_pcie_register_event(struct exynos_pcie_register_event *reg);
+int exynos_pcie_deregister_event(struct exynos_pcie_register_event *reg);
+int exynos_pcie_rc_set_affinity(int ch_num, int affinity);
+int exynos_pcie_rc_set_enable_wake(struct irq_data *data, unsigned int enable);
+int exynos_pcie_rc_itmon_notifier(struct notifier_block *nb, unsigned long action, void *nb_data);
+int register_separated_msi_vector(int ch_num, irq_handler_t handler, void *context,
+		int *irq_num);
+u32 pcie_linkup_stat(void);
+int exynos_pcie_set_msi_ctrl_addr(int ch_num, u64 msi_ctrl_addr);
 #endif
