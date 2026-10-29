@@ -467,7 +467,7 @@ static int sbb_mux_initialize_gpio_tracker(struct sbb_gpio_tracker *tracker,
 		return -EINVAL;
 	}
 
-	gpio_system_id = of_get_gpio(platform_dev->dev.of_node, gpio_id);
+	gpio_system_id = of_get_named_gpio(platform_dev->dev.of_node, "gpios", gpio_id);
 	if (gpio_system_id < 0) {
 		pr_err("sbb-mux: of_get_gpio failed for %d!\n", gpio_id);
 		return gpio_system_id;
@@ -581,7 +581,7 @@ static int sbb_mux_drv_probe(struct platform_device *dev)
 
 	pr_info("sbb-mux: Calling %s!\n", __func__);
 
-	num_gpios = of_gpio_count(dev->dev.of_node);
+	num_gpios = of_count_phandle_with_args(dev->dev.of_node, "gpios", "#gpio-cells");
 	pr_info("sbb-mux: Num GPIOs: %d.\n", num_gpios);
 
 	if (num_gpios <= 0) {
@@ -667,13 +667,11 @@ static void sbb_mux_drv_undo_probe(struct sbb_gpio_tracker **gpio_trackers_ptr)
 	*gpio_trackers_ptr = NULL;
 }
 
-static int sbb_mux_drv_remove(struct platform_device *dev)
+static void sbb_mux_drv_remove(struct platform_device *dev)
 {
 	pr_info("sbb-mux: Calling %s!\n", __func__);
 
 	sbb_mux_drv_undo_probe(&gpio_trackers);
-
-	return 0;
 }
 
 static int __init sbb_mux_init(void)
