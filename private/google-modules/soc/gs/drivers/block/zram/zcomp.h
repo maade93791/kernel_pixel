@@ -10,7 +10,9 @@
 #include "zram_drv.h"
 
 struct zcomp;
+struct zcomp_read_buffer;
 struct bio;
+struct module;
 
 #define ZCOMP_ALGO_NAME_MAX 64
 #define BATCH_ZCOMP_REQUEST (128)
@@ -36,6 +38,7 @@ struct zcomp_cookie_pool {
 };
 
 struct zcomp_operation {
+	struct module *owner;
 	int (*compress)(struct zcomp *comp, struct page *page, struct zcomp_cookie *cookie);
 	int (*compress_async)(struct zcomp *comp, struct page *page, struct zcomp_cookie *cookie);
 	int (*decompress)(struct zcomp *comp, void *src, unsigned int src_len, struct page *page);
@@ -48,6 +51,7 @@ struct zcomp_operation {
 struct zcomp {
 	struct zram *zram;
 	void *private;
+	struct zcomp_read_buffer __percpu *read_buffers;
 	const struct zcomp_operation *op;
 	struct list_head list;
 	struct zcomp_cookie_pool cookie_pool;

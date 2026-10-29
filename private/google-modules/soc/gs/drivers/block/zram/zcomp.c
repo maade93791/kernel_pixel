@@ -4,6 +4,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/err.h>
 #include <linux/slab.h>
@@ -37,8 +38,52 @@ struct zcomp_backend {
 static LIST_HEAD(zcomp_list);
 static DECLARE_RWSEM(zcomp_rwsem);
 
+/* A direct-mapped page is also suitable for the EH decompressor's DMA input. */
+struct zcomp_read_buffer {
+	local_lock_t lock;
+	void *buffer;
+};
+
+static void zcomp_free_read_buffers(struct zcomp *comp)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct zcomp_read_buffer *rb = per_cpu_ptr(comp->read_buffers, cpu);
+
+		if (rb->buffer) {
+			memzero_explicit(rb->buffer, PAGE_SIZE);
+			free_page((unsigned long)rb->buffer);
+		}
+	}
+	free_percpu(comp->read_buffers);
+	comp->read_buffers = NULL;
+}
+
+static int zcomp_alloc_read_buffers(struct zcomp *comp)
+{
+	int cpu;
+
+	comp->read_buffers = alloc_percpu(struct zcomp_read_buffer);
+	if (!comp->read_buffers)
+		return -ENOMEM;
+
+	/* Allocate before I/O; decompression holds the slot's bit spinlock. */
+	for_each_possible_cpu(cpu) {
+		struct zcomp_read_buffer *rb = per_cpu_ptr(comp->read_buffers, cpu);
+
+		local_lock_init(&rb->lock);
+		rb->buffer = (void *)get_zeroed_page(GFP_KERNEL);
+		if (!rb->buffer) {
+			zcomp_free_read_buffers(comp);
+			return -ENOMEM;
+		}
+	}
+	return 0;
+}
+
 /* caller should hold a zcomp_rwsem under semaphore */
-struct zcomp *find_zcomp(const char *algo_name)
+static struct zcomp *find_zcomp(const char *algo_name)
 {
 	struct zcomp *cursor, *ret = NULL;
 
@@ -397,6 +442,7 @@ int zcomp_decompress(struct zcomp *comp, u32 index, struct page *page)
 	unsigned int src_len;
 	unsigned long handle;
 	struct zram *zram = comp->zram;
+	struct zcomp_read_buffer *rb;
 
 	handle = zram_get_handle(zram, index);
 	if (!handle || zram_test_flag(zram, index, ZRAM_SAME)) {
@@ -410,28 +456,37 @@ int zcomp_decompress(struct zcomp *comp, u32 index, struct page *page)
 
 	src_len = zram_get_obj_size(zram, index);
 	if (src_len == PAGE_SIZE) {
-		src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
+		src = zs_obj_read_begin(zram->mem_pool, handle, NULL);
 		dst = kmap_atomic(page);
 		memcpy(dst, src, PAGE_SIZE);
 		kunmap_atomic(dst);
-		zs_unmap_object(zram->mem_pool, handle);
+		zs_obj_read_end(zram->mem_pool, handle, src);
 		goto out;
 	}
 
-	src = zs_map_object(zram->mem_pool, handle, ZS_MM_RO);
+	local_lock(&comp->read_buffers->lock);
+	rb = this_cpu_ptr(comp->read_buffers);
+	src = zs_obj_read_begin(zram->mem_pool, handle, rb->buffer);
 	trace_zcomp_decompress_start(page, index);
 	ret = comp->op->decompress(comp, src, src_len, page);
 	trace_zcomp_decompress_end(page, index);
-	zs_unmap_object(zram->mem_pool, handle);
+	zs_obj_read_end(zram->mem_pool, handle, src);
+	local_unlock(&comp->read_buffers->lock);
 out:
 	return ret;
 }
 
 void zcomp_destroy(struct zcomp *comp)
 {
-	comp->op->destroy(comp);
+	struct module *owner = comp->op->owner;
+
+	zcomp_free_read_buffers(comp);
 	if (zcomp_async(comp))
 		destroy_zcomp_cookie_pool(comp);
+
+	comp->op->destroy(comp);
+	kfree(comp);
+	module_put(owner);
 }
 
 /*
@@ -444,18 +499,49 @@ void zcomp_destroy(struct zcomp *comp)
  */
 struct zcomp *zcomp_create(const char *algo_name, struct zram *zram)
 {
-	struct zcomp *comp;
+	struct zcomp *backend, *comp;
 	int error;
 
 	down_read(&zcomp_rwsem);
-	comp = find_zcomp(algo_name);
-	if (!comp) {
+	backend = find_zcomp(algo_name);
+	if (!backend) {
 		up_read(&zcomp_rwsem);
 		return ERR_PTR(-EINVAL);
 	}
 
+	/* A published descriptor must not expose a still-fallible module init. */
+	if (backend->op->owner && module_is_coming(backend->op->owner)) {
+		up_read(&zcomp_rwsem);
+		return ERR_PTR(-EAGAIN);
+	}
+	if (!try_module_get(backend->op->owner)) {
+		up_read(&zcomp_rwsem);
+		return ERR_PTR(-ENODEV);
+	}
+
+	comp = kzalloc(sizeof(*comp), GFP_KERNEL);
+	if (!comp) {
+		module_put(backend->op->owner);
+		up_read(&zcomp_rwsem);
+		return ERR_PTR(-ENOMEM);
+	}
+	strscpy(comp->algo_name, backend->algo_name, sizeof(comp->algo_name));
+	comp->op = backend->op;
+	comp->zram = zram;
+
+	error = zcomp_alloc_read_buffers(comp);
+	if (error) {
+		module_put(comp->op->owner);
+		kfree(comp);
+		up_read(&zcomp_rwsem);
+		return ERR_PTR(error);
+	}
+
 	error = comp->op->create(comp, algo_name);
 	if (error) {
+		zcomp_free_read_buffers(comp);
+		module_put(comp->op->owner);
+		kfree(comp);
 		up_read(&zcomp_rwsem);
 		return ERR_PTR(error);
 	}
@@ -466,7 +552,6 @@ struct zcomp *zcomp_create(const char *algo_name, struct zram *zram)
 		spin_lock_init(&comp->request_lock);
 		comp->pend_request = 0;
 	}
-	comp->zram = zram;
 	up_read(&zcomp_rwsem);
 
 	if (!huge_class_size)
@@ -487,7 +572,6 @@ struct zcomp *zcomp_create(const char *algo_name, struct zram *zram)
 int zcomp_copy_buffer(int err, void *buffer, int comp_len,
 		      struct zcomp_cookie *cookie)
 {
-	void *dst_addr;
 	unsigned long handle;
 	struct zram *zram = cookie->zram;
 	struct page *page = cookie->page;
@@ -505,32 +589,26 @@ int zcomp_copy_buffer(int err, void *buffer, int comp_len,
 			__GFP_NOWARN |
 			__GFP_HIGHMEM |
 			__GFP_MOVABLE |
-			__GFP_CMA);
+			__GFP_CMA, page_to_nid(page));
 	if (IS_ERR((void *)handle)) {
 		err = PTR_ERR((void *)handle);
 		goto out;
 	}
 
-	dst_addr = zs_map_object(zram->mem_pool, handle, ZS_MM_WO);
 	if (comp_len == PAGE_SIZE) {
 		void *src = kmap_atomic(page);
 
-		memcpy(dst_addr, src, comp_len);
+		zs_obj_write(zram->mem_pool, handle, src, comp_len);
 		kunmap_atomic(src);
 	} else {
-		memcpy(dst_addr, buffer, comp_len);
+		zs_obj_write(zram->mem_pool, handle, buffer, comp_len);
 	}
-	zs_unmap_object(zram->mem_pool, handle);
 	zram_slot_update(zram, index, handle, comp_len);
 out:
 	if (zcomp_async(zram->comp)) {
-		if (!bio) { /* rw_page case */
-			zram_page_write_endio(zram, page, err);
-		} else {
-			zram_bio_endio(zram, bio, true, err);
-		}
-
+		/* Completion may let reset destroy this compressor instance. */
 		free_zcomp_cookie(zram->comp, cookie);
+		zram_bio_endio(zram, bio, true, err);
 	}
 
 	return err;
