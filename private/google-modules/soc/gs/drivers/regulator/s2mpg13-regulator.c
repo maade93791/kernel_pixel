@@ -370,7 +370,7 @@ static int s2mpg13_pmic_dt_parse_pdata(struct s2mpg13_dev *iodev,
 	of_property_read_u32(pmic_np, "buck_ocp_ctrl7", &pdata->buck_ocp_ctrl7);
 
 	/* parse OCP_WARN information */
-	pdata->b2_ocp_warn_pin = of_get_gpio(pmic_np, 0);
+	pdata->b2_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 0);
 	if (pdata->b2_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_ocp_warn_pin < 0: %d\n",
 			pdata->b2_ocp_warn_pin);
@@ -388,7 +388,7 @@ static int s2mpg13_pmic_dt_parse_pdata(struct s2mpg13_dev *iodev,
 	pdata->b2_ocp_warn_lvl = ret ? 0 : val;
 
 	/* parse SOFT_OCP_WARN information */
-	pdata->b2_soft_ocp_warn_pin = of_get_gpio(pmic_np, 1);
+	pdata->b2_soft_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 1);
 	if (pdata->b2_soft_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_soft_ocp_warn_pin < 0: %d\n",
 			pdata->b2_soft_ocp_warn_pin);
@@ -583,7 +583,7 @@ static ssize_t s2mpg13_pmic_write_show(struct device *dev,
 static DEVICE_ATTR_RW(s2mpg13_pmic_write);
 static DEVICE_ATTR_RW(s2mpg13_pmic_read);
 
-int create_s2mpg13_pmic_sysfs(struct s2mpg13_pmic *s2mpg13)
+static int create_s2mpg13_pmic_sysfs(struct s2mpg13_pmic *s2mpg13)
 {
 	struct device *s2mpg13_pmic = s2mpg13->dev;
 	int err = -ENODEV;
@@ -610,7 +610,7 @@ int create_s2mpg13_pmic_sysfs(struct s2mpg13_pmic *s2mpg13)
 }
 #endif
 
-void s2mpg13_ocp_detection_config(struct s2mpg13_pmic *s2mpg13,
+static void s2mpg13_ocp_detection_config(struct s2mpg13_pmic *s2mpg13,
 				  struct s2mpg13_platform_data *pdata)
 {
 	int ret;
@@ -651,7 +651,7 @@ void s2mpg13_ocp_detection_config(struct s2mpg13_pmic *s2mpg13,
 		dev_err(s2mpg13->dev, "i2c write error setting BUCK_OCP_CTRL7: %d\n", ret);
 }
 
-int s2mpg13_ocp_warn(struct s2mpg13_pmic *s2mpg13,
+static int s2mpg13_ocp_warn(struct s2mpg13_pmic *s2mpg13,
 		     struct s2mpg13_platform_data *pdata)
 {
 	u8 val;
@@ -715,7 +715,8 @@ err:
 	return -1;
 }
 
-int s2mpg13_oi_function(struct s2mpg13_pmic *s2mpg13)
+#if IS_ENABLED(TEST_DBG)
+static int s2mpg13_oi_function(struct s2mpg13_pmic *s2mpg13)
 {
 	int ret = 0;
 	/* add OI configuration code if necessary */
@@ -728,6 +729,8 @@ int s2mpg13_oi_function(struct s2mpg13_pmic *s2mpg13)
 
 	return ret;
 }
+#endif
+
 
 static int s2mpg13_pmic_probe(struct platform_device *pdev)
 {
@@ -827,14 +830,13 @@ static int s2mpg13_pmic_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int s2mpg13_pmic_remove(struct platform_device *pdev)
+static void s2mpg13_pmic_remove(struct platform_device *pdev)
 {
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG_PMIC)
 	struct s2mpg13_pmic *s2mpg13 = platform_get_drvdata(pdev);
 
 	pmic_device_destroy(s2mpg13->dev->devt);
 #endif
-	return 0;
 }
 
 static void s2mpg13_pmic_shutdown(struct platform_device *pdev)

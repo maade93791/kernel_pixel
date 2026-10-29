@@ -354,7 +354,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 		rdata++;
 	}
 
-	if (of_gpio_count(pmic_np) < 1) {
+	if (of_count_phandle_with_args(pmic_np, "gpios", "#gpio-cells") < 1) {
 		dev_err(iodev->dev, "could not find pmic gpios\n");
 		return -EINVAL;
 	}
@@ -371,7 +371,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	of_property_read_u32(pmic_np, "buck_ocp_ctrl5", &pdata->buck_ocp_ctrl5);
 
 	/* parse SMPL_WARN information */
-	pdata->smpl_warn_pin = of_get_gpio(pmic_np, 0);
+	pdata->smpl_warn_pin = of_get_named_gpio(pmic_np, "gpios", 0);
 	if (pdata->smpl_warn_pin < 0)
 		dev_err(iodev->dev, "smpl_warn_pin < 0: %d\n",
 			pdata->smpl_warn_pin);
@@ -386,7 +386,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	pdata->smpl_warn_lbdt = ret ? 0 : val;
 
 	/* parse OCP_WARN information */
-	pdata->b2_ocp_warn_pin = of_get_gpio(pmic_np, 2);
+	pdata->b2_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 2);
 	if (pdata->b2_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_ocp_warn_pin < 0: %d\n",
 			pdata->b2_ocp_warn_pin);
@@ -406,7 +406,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	ret = of_property_read_u32(pmic_np, "b2_ocp_warn_debounce_clk", &val);
 	pdata->b2_ocp_warn_debounce_clk = ret ? 0 : val;
 
-	pdata->b3_ocp_warn_pin = of_get_gpio(pmic_np, 1);
+	pdata->b3_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 1);
 	if (pdata->b3_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b3_ocp_warn_pin < 0: %d\n",
 			pdata->b3_ocp_warn_pin);
@@ -429,7 +429,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	ret = of_property_read_u32(pmic_np, "b7_ocp_warn_en", &val);
 	pdata->b7_ocp_warn_en = ret ? 0 : val;
 
-	pdata->b7_ocp_warn_pin = of_get_gpio(pmic_np, 5);
+	pdata->b7_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 5);
 	if (pdata->b7_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b7_ocp_warn_pin < 0: %d\n",
 			pdata->b7_ocp_warn_pin);
@@ -447,7 +447,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	pdata->b7_ocp_warn_debounce_clk = ret ? 0 : val;
 
 	/* parse SOFT_OCP_WARN information */
-	pdata->b2_soft_ocp_warn_pin = of_get_gpio(pmic_np, 4);
+	pdata->b2_soft_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 4);
 	if (pdata->b2_soft_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_soft_ocp_warn_pin < 0: %d\n",
 			pdata->b2_soft_ocp_warn_pin);
@@ -467,7 +467,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	ret = of_property_read_u32(pmic_np, "b2_soft_ocp_warn_debounce_clk", &val);
 	pdata->b2_soft_ocp_warn_debounce_clk = ret ? 0 : val;
 
-	pdata->b3_soft_ocp_warn_pin = of_get_gpio(pmic_np, 3);
+	pdata->b3_soft_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 3);
 	if (pdata->b3_soft_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b3_soft_ocp_warn_pin < 0: %d\n",
 			pdata->b3_soft_ocp_warn_pin);
@@ -487,7 +487,7 @@ static int s2mpg14_pmic_dt_parse_pdata(struct s2mpg14_dev *iodev,
 	ret = of_property_read_u32(pmic_np, "b3_soft_ocp_warn_debounce_clk", &val);
 	pdata->b3_soft_ocp_warn_debounce_clk = ret ? 0 : val;
 
-	pdata->b7_soft_ocp_warn_pin = of_get_gpio(pmic_np, 6);
+	pdata->b7_soft_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 6);
 	if (pdata->b7_soft_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b7_soft_ocp_warn_pin < 0: %d\n",
 			pdata->b7_soft_ocp_warn_pin);
@@ -654,7 +654,7 @@ static ssize_t s2mpg14_pmic_write_show(struct device *dev,
 static DEVICE_ATTR_RW(s2mpg14_pmic_write);
 static DEVICE_ATTR_RW(s2mpg14_pmic_read);
 
-int create_s2mpg14_pmic_sysfs(struct s2mpg14_pmic *s2mpg14)
+static int create_s2mpg14_pmic_sysfs(struct s2mpg14_pmic *s2mpg14)
 {
 	struct device *s2mpg14_pmic = s2mpg14->dev;
 	int err = -ENODEV;
@@ -700,7 +700,7 @@ static irqreturn_t s2mpg14_buck_ocp_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-void s2mpg14_ocp_detection_config(struct s2mpg14_pmic *s2mpg14,
+static void s2mpg14_ocp_detection_config(struct s2mpg14_pmic *s2mpg14,
 				  struct s2mpg14_platform_data *pdata)
 {
 	int ret;
@@ -746,7 +746,7 @@ void s2mpg14_ocp_detection_config(struct s2mpg14_pmic *s2mpg14,
 			"i2c write error setting BUCK_OCP_CTRL5: %d\n", ret);
 }
 
-int s2mpg14_smpl_warn(struct s2mpg14_pmic *s2mpg14,
+static int s2mpg14_smpl_warn(struct s2mpg14_pmic *s2mpg14,
 		      struct s2mpg14_platform_data *pdata)
 {
 	u8 val;
@@ -764,7 +764,7 @@ int s2mpg14_smpl_warn(struct s2mpg14_pmic *s2mpg14,
 	return ret;
 }
 
-int s2mpg14_ocp_warn(struct s2mpg14_pmic *s2mpg14,
+static int s2mpg14_ocp_warn(struct s2mpg14_pmic *s2mpg14,
 		     struct s2mpg14_platform_data *pdata)
 {
 	u8 val;
@@ -889,7 +889,7 @@ static int s2mpg14_set_sel_vgpio(struct s2mpg14_pmic *s2mpg14,
 	return 0;
 }
 
-int s2mpg14_oi_function(struct s2mpg14_pmic *s2mpg14)
+static int s2mpg14_oi_function(struct s2mpg14_pmic *s2mpg14)
 {
 	int ret = 0;
 	/* add OI configuration code if necessary */
@@ -1028,14 +1028,13 @@ static int s2mpg14_pmic_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int s2mpg14_pmic_remove(struct platform_device *pdev)
+static void s2mpg14_pmic_remove(struct platform_device *pdev)
 {
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG_PMIC)
 	struct s2mpg14_pmic *s2mpg14 = platform_get_drvdata(pdev);
 
 	pmic_device_destroy(s2mpg14->dev->devt);
 #endif
-	return 0;
 }
 
 static void s2mpg14_pmic_shutdown(struct platform_device *pdev)
