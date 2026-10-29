@@ -8,6 +8,7 @@
 #include "lwis_platform_casablanca.h"
 
 #include <linux/iommu.h>
+#include <soc/google/samsung-iommu.h>
 #include <linux/of.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
@@ -63,7 +64,7 @@ int lwis_platform_probe(struct lwis_device *lwis_dev)
 	return 0;
 }
 
-static int lwis_iommu_fault_handler(struct iommu_fault *fault, void *param)
+static int lwis_iommu_fault_handler(const struct samsung_iommu_fault *fault, void *param)
 {
 	int ret;
 	struct of_phandle_iterator it;
@@ -121,6 +122,7 @@ int lwis_platform_device_enable(struct lwis_device *lwis_dev)
 {
 	int ret;
 	int iommus_len = 0;
+	bool fault_registered = false;
 	struct lwis_platform *platform;
 
 	if (!lwis_dev)
@@ -139,23 +141,30 @@ int lwis_platform_device_enable(struct lwis_device *lwis_dev)
 
 	if (of_find_property(lwis_dev->k_dev->of_node, "iommus", &iommus_len) && iommus_len) {
 		/* Activate IOMMU for the platform device */
-		ret = iommu_register_device_fault_handler(lwis_dev->k_dev, lwis_iommu_fault_handler,
+		ret = samsung_iommu_register_fault_handler(lwis_dev->k_dev, lwis_iommu_fault_handler,
 							  lwis_dev);
 		if (ret < 0) {
 			pr_err("Failed to register fault handler for the device: %d\n", ret);
 			return ret;
 		}
+		fault_registered = true;
 	}
 
 	if (device_support_bts(lwis_dev) && lwis_dev->bts_scenario_name) {
 		lwis_dev->bts_scenario = bts_get_scenindex(lwis_dev->bts_scenario_name);
 		if (!lwis_dev->bts_scenario) {
 			dev_err(lwis_dev->dev, "Failed to get default camera BTS scenario.\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto err_fault_handler;
 		}
 		bts_add_scenario(lwis_dev->bts_scenario);
 	}
 	return 0;
+
+err_fault_handler:
+	if (fault_registered)
+		samsung_iommu_unregister_fault_handler(lwis_dev->k_dev);
+	return ret;
 }
 
 int lwis_platform_device_disable(struct lwis_device *lwis_dev)
@@ -173,15 +182,12 @@ int lwis_platform_device_disable(struct lwis_device *lwis_dev)
 	if (device_support_bts(lwis_dev) && lwis_dev->bts_scenario_name)
 		bts_del_scenario(lwis_dev->bts_scenario);
 
-	/* We can't remove fault handlers, so there's no call corresponding
-	 * to the iommu_register_device_fault_handler above
-	 */
 
 	lwis_platform_remove_qos(lwis_dev);
 
 	if (of_find_property(lwis_dev->k_dev->of_node, "iommus", &iommus_len) && iommus_len) {
 		/* Deactivate IOMMU */
-		iommu_unregister_device_fault_handler(lwis_dev->k_dev);
+		samsung_iommu_unregister_fault_handler(lwis_dev->k_dev);
 	}
 
 	/* Disable platform device */
