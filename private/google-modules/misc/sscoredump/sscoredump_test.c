@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/platform_data/sscoredump.h>
+#include <linux/platform_device.h>
 
 #define DEVICE_NAME "sscoredump-test"
 #define MAX_OPEN     4
@@ -109,12 +110,30 @@ static struct platform_device *sscd_register(const char *name)
 	struct sscd_platform_data sscd_pdata = {0};
 	struct platform_device *pdev = platform_device_alloc(name, -1);
 
-	pdev->driver_override = SSCD_NAME;
-	platform_device_add_data(pdev, &sscd_pdata, sizeof(sscd_pdata));
-	ret = platform_device_add(pdev);
+	if (!pdev) {
+		pr_err("%s: unable to allocate client %s", __func__, name);
+		return NULL;
+	}
 
+	ret = platform_device_add_data(pdev, &sscd_pdata, sizeof(sscd_pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	ret = platform_device_add(pdev);
 	pr_err("%s: pdev %pK ret %d", __func__, pdev, ret);
+	if (ret)
+		goto put_device;
+
 	return pdev;
+
+put_device:
+	pr_err("%s: unable to register client %s: %d", __func__, name, ret);
+	platform_device_put(pdev);
+	return NULL;
 }
 
 static void sscd_unregister(struct platform_device *pdev)

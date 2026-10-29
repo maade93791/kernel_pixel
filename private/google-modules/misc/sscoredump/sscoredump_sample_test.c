@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/platform_data/sscoredump.h>
+#include <linux/platform_device.h>
 
 #define DEVICE_NAME "sscoredump-sample-test"
 #define MAX_SEGS     256
@@ -25,19 +26,8 @@ struct sscd_info {
 	u16                 seg_count;
 };
 
-static void sscd_sample_test_release(struct device *dev);
-
 static struct sscd_info test_info;
-static struct sscd_platform_data sscd_pdata;
-static struct platform_device sscd_dev = {
-	.name            = DEVICE_NAME,
-	.driver_override = SSCD_NAME,
-	.id              = -1,
-	.dev             = {
-		.platform_data = &sscd_pdata,
-		.release       = sscd_sample_test_release,
-	},
-};
+static struct platform_device *sscd_dev;
 
 /* allocate test segments */
 static void test_client_allocate_segments(struct sscd_info *info)
@@ -78,7 +68,7 @@ static ssize_t test_client_coredump_store(struct device *dev,
 
 	if (pdata->sscd_report) {
 		dev_info(dev, "report: %d segments", info->seg_count);
-		pdata->sscd_report(&sscd_dev, info->segs, info->seg_count,
+		pdata->sscd_report(sscd_dev, info->segs, info->seg_count,
 			SSCD_FLAGS_ELFARM64HDR, "sample_test_coredump");
 	}
 
@@ -96,31 +86,59 @@ static struct attribute_group sscd_test_group = {
 	.attrs	= sscd_test_attrs,
 };
 
-static void sscd_sample_test_release(struct device *dev)
-{
-}
-
 static int sscd_sample_test_init(void)
 {
 	struct sscd_info *info = &test_info;
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
 
 	info->name = DEVICE_NAME;
 	info->seg_count = 5;
 	test_client_allocate_segments(info);
 
-	/*
-	 * register SSCD platform device
-	 */
-	platform_device_register(&sscd_dev);
-	return sysfs_create_group(&sscd_dev.dev.kobj, &sscd_test_group);
+	pdev = platform_device_alloc(DEVICE_NAME, -1);
+	if (!pdev) {
+		ret = -ENOMEM;
+		goto free_segments;
+	}
+
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	sscd_dev = pdev;
+	ret = sysfs_create_group(&pdev->dev.kobj, &sscd_test_group);
+	if (ret) {
+		platform_device_unregister(pdev);
+		sscd_dev = NULL;
+		goto free_segments;
+	}
+
+	return 0;
+
+put_device:
+	platform_device_put(pdev);
+free_segments:
+	test_client_free_segments(info);
+	return ret;
 }
 
 static void sscd_sample_test_exit(void)
 {
 	struct sscd_info *info = &test_info;
 
-	sysfs_remove_group(&sscd_dev.dev.kobj, &sscd_test_group);
-	platform_device_unregister(&sscd_dev);
+	sysfs_remove_group(&sscd_dev->dev.kobj, &sscd_test_group);
+	platform_device_unregister(sscd_dev);
+	sscd_dev = NULL;
 
 	test_client_free_segments(info);
 }
