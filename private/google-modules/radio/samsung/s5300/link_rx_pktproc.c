@@ -1928,12 +1928,23 @@ int pktproc_create(struct platform_device *pdev, struct mem_link_device *mld,
 
 		mif_info("Create queue %d\n", i);
 
-		ppa->q[i] = kzalloc(sizeof(*ppa->q[i]), GFP_ATOMIC);
-		if (ppa->q[i] == NULL) {
-			ret = -ENOMEM;
-			goto create_error;
+		if (ppa->use_exclusive_irq) {
+			struct net_device *netdev = alloc_netdev_dummy(sizeof(*q));
+
+			if (!netdev) {
+				ret = -ENOMEM;
+				goto create_error;
+			}
+			q = netdev_priv(netdev);
+			q->netdev = netdev;
+		} else {
+			q = kzalloc(sizeof(*q), GFP_ATOMIC);
+			if (!q) {
+				ret = -ENOMEM;
+				goto create_error;
+			}
 		}
-		q = ppa->q[i];
+		ppa->q[i] = q;
 		q->ppa = ppa;
 
 		atomic_set(&q->active, 0);
@@ -2084,8 +2095,7 @@ int pktproc_create(struct platform_device *pdev, struct mem_link_device *mld,
 
 		/* NAPI */
 		if (ppa->use_exclusive_irq) {
-			init_dummy_netdev(&q->netdev);
-			netif_napi_add(&q->netdev, &q->napi, pktproc_poll);
+			netif_napi_add(q->netdev, &q->napi, pktproc_poll);
 			napi_enable(&q->napi);
 			q->napi_ptr = &q->napi;
 		} else {
@@ -2154,11 +2164,21 @@ create_error:
 		if (!ppa->q[i])
 			continue;
 
+		if (ppa->q[i]->netdev && ppa->q[i]->napi_ptr == &ppa->q[i]->napi) {
+			napi_disable(&ppa->q[i]->napi);
+			netif_napi_del(&ppa->q[i]->napi);
+		}
+
 		if (ppa->q[i]->manager)
 			cpif_exit_netrx_mng(ppa->q[i]->manager);
 
 		kfree(ppa->q[i]->dma_addr);
-		kfree(ppa->q[i]);
+		if (ppa->q[i]->netdev) {
+			free_netdev(ppa->q[i]->netdev);
+		} else {
+			kfree(ppa->q[i]);
+		}
+		ppa->q[i] = NULL;
 	}
 
 	if (!ppa->info_rgn_cached && ppa->info_vbase)

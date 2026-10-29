@@ -167,6 +167,7 @@ extern void tpmon_add_rx_bytes(struct sk_buff *skb);
 extern void tpmon_add_legacy_packet_count(u32 count);
 extern void tpmon_add_net_node(struct list_head *node);
 extern int tpmon_check_active(void);
+extern void tpmon_reset_data(char *name);
 #else
 static inline int tpmon_create(struct platform_device *pdev, struct link_device *ld) { return 0; }
 static inline int tpmon_start(void) { return 0; }
