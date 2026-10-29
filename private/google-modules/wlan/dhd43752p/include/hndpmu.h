@@ -212,14 +212,11 @@ extern void si_pmu_gband_spurwar(si_t *sih, osl_t *osh);
 extern bool si_pmu_is_otp_powered(si_t *sih, osl_t *osh);
 extern uint32 si_pmu_measure_alpclk(si_t *sih, osl_t *osh);
 
-extern uint32 si_pmu_chipcontrol(si_t *sih, uint reg, uint32 mask, uint32 val);
 #if defined(SAVERESTORE)
 extern void si_set_abuck_mode_4362(si_t *sih, uint8 mode);
 #endif /* SAVERESTORE */
 
 #define si_pmu_regcontrol si_pmu_vreg_control /* prevents build err because of usage in PHY */
-extern uint32 si_pmu_vreg_control(si_t *sih, uint reg, uint32 mask, uint32 val);
-extern uint32 si_pmu_pllcontrol(si_t *sih, uint reg, uint32 mask, uint32 val);
 extern void si_pmu_pllupd(si_t *sih);
 
 extern uint32 si_pmu_waitforclk_on_backplane(si_t *sih, osl_t *osh, uint32 clk, uint32 delay);
@@ -252,6 +249,10 @@ int si_pmu_ldo3p3_soft_start_bt_get(si_t *sih, osl_t *osh, int *res);
 int si_pmu_ldo3p3_soft_start_bt_set(si_t *sih, osl_t *osh, uint32 slew_rate);
 extern int si_pmu_min_res_otp_pu_set(si_t *sih, osl_t *osh, bool on);
 #endif /* !defined(BCMDONGLEHOST) */
+
+extern uint32 si_pmu_chipcontrol(si_t *sih, uint reg, uint32 mask, uint32 val);
+extern uint32 si_pmu_vreg_control(si_t *sih, uint reg, uint32 mask, uint32 val);
+extern uint32 si_pmu_pllcontrol(si_t *sih, uint reg, uint32 mask, uint32 val);
 
 #if defined(EDV)
 extern uint32 si_pmu_get_backplaneclkspeed(si_t *sih);

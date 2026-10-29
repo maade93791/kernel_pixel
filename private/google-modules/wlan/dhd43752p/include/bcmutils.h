@@ -298,9 +298,9 @@ extern uint get_slicespecific_var_name(osl_t *osh, char *vars_table_accessor,
 	const char *name, char **name_out);
 
 extern uint getgpiopin(char *vars, char *pin_name, uint def_pin);
-#ifdef BCMDBG
+#if defined(BCMDBG) || defined(DHD_DEBUG)
 extern void prpkt(const char *msg, osl_t *osh, void *p0);
-#endif /* BCMDBG */
+#endif /* BCMDBG || DHD_DEBUG */
 #ifdef BCMPERFSTATS
 extern void bcm_perf_enable(void);
 extern void bcmstats(char *fmt);

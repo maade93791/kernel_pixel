@@ -3655,11 +3655,11 @@ vendor_concat_revision(dhd_bus_t *bus, char *fw_path, char *nv_path)
 
 	DHD_ERROR(("%s:failed to find extension, use %s as default\n", __FUNCTION__, DEF_REVISION));
 	/* Failed to find info, use _c0 as default */
-	strlcat(nv_path, tag, PATH_MAX);
-	strlcat(fw_path, tag, PATH_MAX);
+	strlcat_s(nv_path, tag, PATH_MAX);
+	strlcat_s(fw_path, tag, PATH_MAX);
 #if defined(DHD_COREDUMP) && defined(SUPPORT_MULTIPLE_REVISION_MAP)
 	if (!bcmstrnstr(map_path, PATH_MAX, tag, strlen(tag))) {
-		strlcat(map_path, tag, PATH_MAX);
+		strlcat_s(map_path, tag, PATH_MAX);
 	}
 #endif /* DHD_COREDUMP && SUPPORT_MULTIPLE_REVISION_MAP */
 	return ret;
@@ -4032,7 +4032,7 @@ dhdpcie_download_code_file(struct dhd_bus *bus, char *pfw_path)
 			__FUNCTION__, file_size));
 	} else {
 		file_size = fwpkg_get_firmware_img_size(fwpkg);
-		strlcpy(bus->fwsig_filename, pfw_path, sizeof(bus->fwsig_filename));
+		strscpy(bus->fwsig_filename, pfw_path, sizeof(bus->fwsig_filename));
 		DHD_INFO(("%s Using COMBINED image (size %d)\n",
 			__FUNCTION__, file_size));
 	}
@@ -10698,8 +10698,8 @@ dhdpcie_bus_save_download_info(dhd_bus_t *bus, uint32 download_addr,
 		bus->fw_download_len = download_size;
 	}
 	bus->fw_download_addr = download_addr;
-	strlcpy(bus->fwsig_filename, signature_fname, sizeof(bus->fwsig_filename));
-	strlcpy(bus->bootloader_filename, bloader_fname, sizeof(bus->bootloader_filename));
+	strscpy(bus->fwsig_filename, signature_fname, sizeof(bus->fwsig_filename));
+	strscpy(bus->bootloader_filename, bloader_fname, sizeof(bus->bootloader_filename));
 	bus->bootloader_addr = bloader_download_addr;
 #ifdef GDB_PROXY
 	/* GDB proxy bootloader mode - if signature file specified (i.e.
@@ -18112,5 +18112,5 @@ dhd_bus_get_socram_buf(struct dhd_bus *bus, struct dhd_pub *dhdp)
 void
 dhd_bus_set_signature_path(struct dhd_bus *bus, char *sig_path)
 {
-	strlcpy(bus->fwsig_filename, sig_path, sizeof(bus->fwsig_filename));
+	strscpy(bus->fwsig_filename, sig_path, sizeof(bus->fwsig_filename));
 }

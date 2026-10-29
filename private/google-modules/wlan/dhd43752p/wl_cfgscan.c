@@ -21,6 +21,7 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 /* */
+#include <linux/sched/clock.h>
 #include <typedefs.h>
 #include <linuxver.h>
 #include <osl.h>
@@ -126,7 +127,6 @@ bool g_first_broadcast_scan = TRUE;
 bool wl_scan_timeout_dbg_enabled = 0;
 #endif /* CUSTOMER_HW4_DEBUG */
 #ifdef P2P_LISTEN_OFFLOADING
-void wl_cfg80211_cancel_p2plo(struct bcm_cfg80211 *cfg);
 #endif /* P2P_LISTEN_OFFLOADING */
 static void _wl_notify_scan_done(struct bcm_cfg80211 *cfg, bool aborted);
 static s32 wl_notify_escan_complete(struct bcm_cfg80211 *cfg,
@@ -1236,7 +1236,7 @@ wl_retrieve_wps_attribute(const u8 *buf, u16 element_id)
 	return wl_find_attribute(attrib, len, element_id);
 }
 
-bool
+static bool
 wl_is_wps_enrollee_active(struct net_device *ndev, const u8 *ie_ptr, u16 len)
 {
 	const u8 *ie;
@@ -2575,7 +2575,7 @@ wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
  * held so that scan_request data structures doesn't
  * get modified in between.
  */
-struct wireless_dev *
+static struct wireless_dev *
 wl_get_scan_wdev(struct bcm_cfg80211 *cfg)
 {
 	struct wireless_dev *wdev = NULL;
@@ -5087,7 +5087,11 @@ wl_priortize_scan_over_listen(struct bcm_cfg80211 *cfg,
 #if defined(WL_CFG80211_P2P_DEV_IF)
 s32
 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
-	struct ieee80211_channel *channel, unsigned int duration, u64 *cookie)
+	struct ieee80211_channel *channel, unsigned int duration, u64 *cookie
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	, const u8 *rx_addr
+#endif
+)
 #else
 s32
 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
@@ -5103,6 +5107,11 @@ wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	struct wireless_dev *wdev;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* ROC address filtering is not advertised or implemented. */
+	if (rx_addr)
+		return -EOPNOTSUPP;
+#endif
 	RETURN_EIO_IF_NOT_UP(cfg);
 
 #if defined(WL_CFG80211_P2P_DEV_IF)

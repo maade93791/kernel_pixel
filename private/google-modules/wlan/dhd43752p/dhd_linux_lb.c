@@ -579,7 +579,7 @@ void dhd_lb_stats_deinit(dhd_pub_t *dhdp)
 	return;
 }
 
-void dhd_lb_stats_dump_napi_latency(dhd_pub_t *dhdp,
+static void dhd_lb_stats_dump_napi_latency(dhd_pub_t *dhdp,
 	struct bcmstrbuf *strbuf, uint64 *napi_latency)
 {
 	uint32 i;
@@ -590,7 +590,7 @@ void dhd_lb_stats_dump_napi_latency(dhd_pub_t *dhdp,
 	}
 }
 
-void dhd_lb_stats_dump_histo(dhd_pub_t *dhdp,
+static void dhd_lb_stats_dump_histo(dhd_pub_t *dhdp,
 	struct bcmstrbuf *strbuf, uint32 **hist)
 {
 	int i, j;
@@ -634,7 +634,7 @@ void dhd_lb_stats_dump_histo(dhd_pub_t *dhdp,
 	return;
 }
 
-void dhd_lb_stats_dump_cpu_array(struct bcmstrbuf *strbuf, uint32 *p)
+static void dhd_lb_stats_dump_cpu_array(struct bcmstrbuf *strbuf, uint32 *p)
 {
 	int i, num_cpus = num_possible_cpus();
 
@@ -749,7 +749,7 @@ void dhd_lb_stats_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 #endif /* DHD_LB_TXP */
 }
 
-void dhd_lb_stats_update_napi_latency(uint64 *bin, uint32 latency)
+static void dhd_lb_stats_update_napi_latency(uint64 *bin, uint32 latency)
 {
 	uint64 *p;
 	uint32 bin_power;
@@ -780,7 +780,7 @@ void dhd_lb_stats_update_napi_latency(uint64 *bin, uint32 latency)
 
 }
 
-void dhd_lb_stats_update_histo(uint32 **bin, uint32 count, uint32 cpu)
+static void dhd_lb_stats_update_histo(uint32 **bin, uint32 count, uint32 cpu)
 {
 	uint32 bin_power;
 	uint32 *p;
@@ -1315,7 +1315,7 @@ BCMFASTPATH(dhd_lb_sendpkt)(dhd_info_t *dhd, struct net_device *net,
 /*
  * Function that performs the TX processing on a given CPU
  */
-bool
+static bool
 dhd_lb_tx_process(dhd_info_t *dhd)
 {
 	struct sk_buff *skb;

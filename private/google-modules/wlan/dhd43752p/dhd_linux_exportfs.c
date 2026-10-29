@@ -28,6 +28,7 @@
 #include <linux/sysfs.h>
 #include <osl.h>
 #include <dhd.h>
+#include <dhd_bus.h>
 #include <dhd_dbg.h>
 #include <dhd_linux_priv.h>
 #if defined(DHD_ADPS_BAM_EXPORT) && defined(WL_BAM)
@@ -773,7 +774,7 @@ static const char pwrstr_cnt[] = "count:";
 static const char pwrstr_dur[] = "duration_usec:";
 static const char pwrstr_ts[] = "last_entry_timestamp_usec:";
 
-ssize_t print_pwrstats_cum(char *buf)
+static ssize_t print_pwrstats_cum(char *buf)
 {
 	ssize_t ret = 0;
 
@@ -823,7 +824,7 @@ ssize_t print_pwrstats_cum(char *buf)
 	return ret;
 }
 
-void update_pwrstats_cum(uint64 *accum, uint64 *last, uint64 *now, bool force)
+static void update_pwrstats_cum(uint64 *accum, uint64 *last, uint64 *now, bool force)
 {
 	if (accum) { /* accumulation case, ex; counts, duration */
 		if (*now < *last) {
@@ -852,7 +853,6 @@ static const uint16 pwrstats_req_type[] = {
 	+ sizeof(wl_pwr_pm_accum_stats_v1_t) \
 	+ (uint)strlen("pwrstats") + 1
 
-extern uint64 dhdpcie_get_last_suspend_time(dhd_pub_t *dhdp);
 
 static ssize_t
 show_pwrstats_path(struct dhd_info *dev, char *buf)
@@ -1229,7 +1229,7 @@ static struct dhd_attr dhd_attr_macaddr =
 #define MEMDUMPINFO PLATFORM_PATH".memdump.info"
 #endif /* CONFIG_X86 */
 
-uint32
+static uint32
 get_mem_val_from_file(void)
 {
 	struct file *fp = NULL;
@@ -1366,7 +1366,7 @@ static struct dhd_attr dhd_attr_memdump =
  */
 #define ASSERTINFO PLATFORM_PATH".assert.info"
 
-int
+static int
 get_assert_val_from_file(void)
 {
 	struct file *fp = NULL;
@@ -2252,7 +2252,7 @@ set_wl_debug_level(struct dhd_info *dhd, const char *buf, size_t count)
 
 	bzero(tbuf, sizeof(tbuf));
 	bzero(sublog, sizeof(sublog));
-	strlcpy(tbuf, buf, minsize);
+	strscpy(tbuf, buf, minsize);
 
 	DHD_INFO(("current wl_dbg_level %d \n", wl_dbg_level));
 

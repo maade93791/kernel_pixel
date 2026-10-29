@@ -21,6 +21,7 @@
  * <<Broadcom-WL-IPTag/Open:>>
  *
  */
+#include <wb_regon_coordinator.h>
 #include <linux/cdev.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -256,7 +257,7 @@ static int wbrc_bt_dev_release(struct inode *inodep, struct file *filep)
 	return 0;
 }
 
-void wbrc_signal_bt_reset(struct wbrc_pvt_data *wbrc_data)
+static void wbrc_signal_bt_reset(struct wbrc_pvt_data *wbrc_data)
 {
 	pr_info("%s\n", __func__);
 
@@ -293,7 +294,7 @@ int wbrc_init(void)
 		goto err_register;
 	}
 
-	wbrc_data->wbrc_bt_dev_class = class_create(THIS_MODULE, CLASS_NAME);
+	wbrc_data->wbrc_bt_dev_class = class_create(CLASS_NAME);
 	err = PTR_ERR(wbrc_data->wbrc_bt_dev_class);
 	if (IS_ERR(wbrc_data->wbrc_bt_dev_class)) {
 		pr_alert("Failed to register device class\n");
@@ -350,7 +351,7 @@ MODULE_AUTHOR(AUTHOR);
  * Returns 1 if the @condition evaluated to true
  */
 #define WBRC_RESET_WAIT_TIMEOUT 4000
-int
+static int
 wbrc_reset_wait_on_condition(wait_queue_head_t *reset_waitq, uint *var, uint condition)
 {
 	int timeout;
@@ -403,7 +404,7 @@ int wbrc_wl2bt_reset(void)
 }
 EXPORT_SYMBOL(wbrc_wl2bt_reset);
 
-int wbrc_signal_wlan_reset(struct wbrc_pvt_data *wbrc_data)
+static int wbrc_signal_wlan_reset(struct wbrc_pvt_data *wbrc_data)
 {
 	/* TODO call dhd reset, right now just send ack from here */
 	wbrc_wl_reset_ack(wbrc_data);

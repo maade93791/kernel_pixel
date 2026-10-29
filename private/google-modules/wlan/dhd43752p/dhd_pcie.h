@@ -772,6 +772,7 @@ extern int dhdpcie_enable_irq(dhd_bus_t *bus);
 extern void dhdpcie_enable_irq_loop(dhd_bus_t *bus);
 
 extern void dhd_bus_dump_dar_registers(struct dhd_bus *bus);
+void dhdpcie_mem_dump_bugcheck(dhd_bus_t *bus, uint8 *buf);
 
 #if defined(linux) || defined(LINUX)
 extern uint32 dhdpcie_rc_config_read(dhd_bus_t *bus, uint offset);
@@ -807,7 +808,6 @@ uint32 dhdpcie_os_rtcm32(dhd_bus_t *bus, ulong offset);
 void dhdpcie_os_wtcm64(dhd_bus_t *bus, ulong offset, uint64 data);
 uint64 dhdpcie_os_rtcm64(dhd_bus_t *bus, ulong offset);
 #endif
-extern void dhd_dpc_kill(dhd_pub_t *dhdp);
 #endif /* LINUX || linux */
 
 #if defined(linux) || defined(LINUX) || defined(DHD_EFI)

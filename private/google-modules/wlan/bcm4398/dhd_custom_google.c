@@ -49,6 +49,7 @@
 
 #ifdef DHD_COREDUMP
 #include <linux/platform_data/sscoredump.h>
+#include <linux/mutex.h>
 #endif /* DHD_COREDUMP */
 
 #define EXYNOS_PCIE_VENDOR_ID 0x144d
@@ -115,37 +116,74 @@ extern void exynos_pcie_set_skip_config(int ch_num, bool val);
 #ifdef DHD_COREDUMP
 #define DEVICE_NAME "wlan"
 
-static void sscd_release(struct device *dev);
 static struct sscd_platform_data sscd_pdata;
-static struct platform_device sscd_dev = {
-	.name            = DEVICE_NAME,
-	.driver_override = SSCD_NAME,
-	.id              = -1,
-	.dev             = {
-		.platform_data = &sscd_pdata,
-		.release       = sscd_release,
-		},
-};
-
-static void sscd_release(struct device *dev)
-{
-	DHD_INFO(("%s: enter\n", __FUNCTION__));
-}
+static struct platform_device *sscd_dev;
+static DEFINE_MUTEX(sscd_lock);
 
 /* trigger coredump */
 static int
 dhd_set_coredump(const char *buf, int buf_len, const char *info)
 {
-	struct sscd_platform_data *pdata = dev_get_platdata(&sscd_dev.dev);
+	struct sscd_platform_data *pdata;
 	struct sscd_segment seg;
 
+	mutex_lock(&sscd_lock);
+	if (!sscd_dev)
+		goto unlock;
+	pdata = dev_get_platdata(&sscd_dev->dev);
 	if (pdata->sscd_report) {
 		bzero(&seg, sizeof(seg));
 		seg.addr = (void *) buf;
 		seg.size = buf_len;
-		pdata->sscd_report(&sscd_dev, &seg, 1, 0, info);
+		pdata->sscd_report(sscd_dev, &seg, 1, 0, info);
 	}
+unlock:
+	mutex_unlock(&sscd_lock);
 	return 0;
+}
+static void
+dhd_plat_register_coredump(void)
+{
+	struct platform_device *pdev;
+	int ret;
+
+	mutex_lock(&sscd_lock);
+	if (sscd_dev)
+		goto unlock;
+	pdev = platform_device_alloc(DEVICE_NAME, PLATFORM_DEVID_NONE);
+	if (!pdev) {
+		ret = -ENOMEM;
+		goto error;
+	}
+	ret = platform_device_add_data(pdev, &sscd_pdata, sizeof(sscd_pdata));
+	if (ret)
+		goto put_device;
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	sscd_dev = pdev;
+	goto unlock;
+put_device:
+	platform_device_put(pdev);
+error:
+	DHD_ERROR(("%s: failed to register coredump device: %d\n", __func__, ret));
+unlock:
+	mutex_unlock(&sscd_lock);
+}
+
+static void
+dhd_plat_unregister_coredump(void)
+{
+	mutex_lock(&sscd_lock);
+	if (sscd_dev) {
+		platform_device_unregister(sscd_dev);
+		sscd_dev = NULL;
+	}
+	mutex_unlock(&sscd_lock);
 }
 #endif /* DHD_COREDUMP */
 
@@ -450,7 +488,7 @@ dhd_get_platform_naming_for_nvram_clmblob_file(download_type_t component, char *
 		error = dhd_check_file_exist(tmp_fname);
 		if (error == BCME_OK) {
 			DHD_LOG_MEM(("%02d path[%s]\n", i, tmp_fname));
-			strlcpy(file_name, tmp_fname, MAX_FILE_LEN);
+			strscpy(file_name, tmp_fname, MAX_FILE_LEN);
 			break;
 		}
 	}
@@ -1202,7 +1240,7 @@ dhd_wlan_init(void)
 #endif /* CONFIG_BROADCOM_WIFI_RESERVED_MEM */
 
 #ifdef DHD_COREDUMP
-	platform_device_register(&sscd_dev);
+	dhd_plat_register_coredump();
 #endif /* DHD_COREDUMP */
 
 	ret = dhd_wifi_init_gpio();
@@ -1240,7 +1278,7 @@ dhd_wlan_deinit(void)
 	}
 
 #ifdef DHD_COREDUMP
-	platform_device_unregister(&sscd_dev);
+	dhd_plat_unregister_coredump();
 #endif /* DHD_COREDUMP */
 
 	return 0;

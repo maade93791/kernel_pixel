@@ -112,8 +112,8 @@ static void cnss_plat_ipc_logging_deinit(void)
 	}
 }
 
-void cnss_plat_ipc_debug_log_print(void *log_ctx, char *process, const char *fn,
-				   const char *log_level, char *fmt, ...)
+static void cnss_plat_ipc_debug_log_print(void *log_ctx, char *process, const char *fn,
+					  const char *log_level, char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list va_args;
@@ -136,8 +136,8 @@ void cnss_plat_ipc_debug_log_print(void *log_ctx, char *process, const char *fn,
 static void cnss_plat_ipc_logging_init(void) {};
 static void cnss_plat_ipc_logging_deinit(void) {};
 
-void cnss_plat_ipc_debug_log_print(void *log_ctx, char *process, const char *fn,
-				   const char *log_level, char *fmt, ...)
+static void cnss_plat_ipc_debug_log_print(void *log_ctx, char *process, const char *fn,
+					  const char *log_level, char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list va_args;

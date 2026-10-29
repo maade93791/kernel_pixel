@@ -1132,13 +1132,18 @@ void mlme_get_mbssid_info(struct wlan_objmgr_vdev *vdev,
 {
 	struct vdev_mlme_obj *vdev_mlme;
 
+	if (!vdev || !mbss_11ax) {
+		mlme_legacy_err("invalid vdev or MBSSID output");
+		return;
+	}
+
 	vdev_mlme = wlan_vdev_mlme_get_cmpt_obj(vdev);
 	if (!vdev_mlme) {
 		mlme_legacy_err("vdev component object is NULL");
 		return;
 	}
 
-	mbss_11ax = &vdev_mlme->mgmt.mbss_11ax;
+	*mbss_11ax = vdev_mlme->mgmt.mbss_11ax;
 }
 
 QDF_STATUS mlme_set_tx_power(struct wlan_objmgr_vdev *vdev,

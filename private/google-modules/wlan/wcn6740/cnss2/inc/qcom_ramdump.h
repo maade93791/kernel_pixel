@@ -26,9 +26,8 @@ extern int qcom_dump(struct list_head *head, struct device *dev);
 extern int qcom_fw_elf_dump(struct firmware *fw, struct device *dev);
 extern bool dump_enabled(void);
 #ifdef CONFIG_WCN_GOOGLE
-extern void cnss_register_sscd(void);
+int cnss_register_sscd(void);
 extern void cnss_unregister_sscd(void);
-extern void sscd_release(struct device *dev);
 extern void sscd_set_coredump(void *buf, int buf_len);
 #endif
 #else

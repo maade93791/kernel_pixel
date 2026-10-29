@@ -23,12 +23,15 @@
  * $Id$
  */
 
+#include <linux/vmalloc.h>
+#include <linux/sched/clock.h>
 #include <typedefs.h>
 #include <osl.h>
 #include <bcmutils.h>
 #include <bcmstdlib_s.h>
 #include <dngl_stats.h>
 #include <dhd.h>
+#include <dhd_common.h>
 #include <dhd_dbg.h>
 #include <dhd_pktlog.h>
 #include <dhd_wlfc.h>
@@ -54,9 +57,6 @@
 #ifndef strtoul
 #define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
 #endif /* strtoul */
-extern int wl_pattern_atoh(char *src, char *dst);
-extern int pattern_atoh_len(char *src, char *dst, int len);
-extern wifi_tx_packet_fate __dhd_dbg_map_tx_status_to_pkt_fate(uint16 status);
 
 #ifdef DHD_COMPACT_PKT_LOG
 #define CPKT_LOG_BITS_PER_BYTE		8

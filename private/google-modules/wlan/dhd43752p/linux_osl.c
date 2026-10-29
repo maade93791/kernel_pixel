@@ -23,6 +23,7 @@
 
 #define LINUX_PORT
 
+#include <linux/sched/clock.h>
 #include <typedefs.h>
 #include <bcmendian.h>
 #include <linuxver.h>

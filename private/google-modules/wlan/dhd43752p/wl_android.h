@@ -60,6 +60,9 @@ typedef struct _compat_android_wifi_priv_cmd {
  * wl_android_init will be called from module init function (dhd_module_init now), similarly
  * wl_android_exit will be called from module exit function (dhd_module_cleanup now)
  */
+struct bcm_cfg80211;
+void wl_cfg80211_cancel_p2plo(struct bcm_cfg80211 *cfg);
+
 int wl_android_init(void);
 int wl_android_exit(void);
 void wl_android_post_init(void);
@@ -154,6 +157,7 @@ s32 wl_netlink_send_msg(int pid, int type, int seq, const void *data, size_t siz
 #define APCS_DEFAULT_6G_CH	5
 
 int wl_android_set_ap_mac_list(struct net_device *dev, int macmode, struct maclist *maclist);
+int wl_fatal_error(void *wl, int rc);
 #ifdef WL_BCNRECV
 extern int wl_android_bcnrecv_config(struct net_device *ndev, char *data,
 		int total_len);

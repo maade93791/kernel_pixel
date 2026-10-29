@@ -2164,7 +2164,7 @@ typedef struct dhd_pktid_map {
 	struct bcm_mwbmap *pktid_audit; /* multi word bitmap based audit */
 #endif /* DHD_PKTID_AUDIT_ENABLED */
 	dhd_pktid_key_t	*keys; /* map_items +1 unique pkt ids */
-	dhd_pktid_item_t lockers[0];           /* metadata storage */
+	dhd_pktid_item_t lockers[];           /* metadata storage */
 } dhd_pktid_map_t;
 
 /*
@@ -3588,7 +3588,7 @@ dhd_alloc_host_scbs(dhd_pub_t *dhd)
 	return ret;
 }
 
-void
+static void
 dhd_set_host_cap(dhd_pub_t *dhd)
 {
 	uint32 data = 0;
@@ -3878,9 +3878,9 @@ dhd_msgbuf_agg_h2d_db_timer_init(dhd_pub_t *dhd)
 	agg_h2d_db_info_t *agg_db_info = &prot->agg_h2d_db_info;
 
 	agg_db_info->dhd = dhd;
-	hrtimer_init(&agg_db_info->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	/* The timer function will run from ISR context, ensure no spin_lock_bh are used */
-	agg_db_info->timer.function = &dhd_msgbuf_agg_h2d_db_timer_fn;
+	hrtimer_setup(&agg_db_info->timer, dhd_msgbuf_agg_h2d_db_timer_fn,
+		CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	agg_db_info->init = TRUE;
 	agg_db_info->timer_db_cnt = 0;
 	agg_db_info->direct_db_cnt = 0;
@@ -9879,7 +9879,7 @@ void dmaxfer_free_dmaaddr(dhd_pub_t *dhd, dhd_dmaxfer_t *dmaxfer)
 }
 
 /** test / loopback */
-int
+static int
 dhd_prepare_schedule_dmaxfer_free(dhd_pub_t *dhdp)
 {
 	dhd_prot_t *prot = dhdp->prot;

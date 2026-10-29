@@ -193,6 +193,7 @@ int _cnss_pci_get_reg_dump(struct cnss_pci_data *pci_priv,
 #endif /* CONFIG_PCI_MSM */
 
 #if IS_ENABLED(CONFIG_WCN_GOOGLE)
+void crash_info_handler(u8 *info);
 int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv);
 int cnss_wlan_init_hardware_info(void);
 int cnss_request_multiple_bdf_files(const struct firmware **fw,

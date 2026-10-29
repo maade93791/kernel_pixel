@@ -2548,7 +2548,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 			sta_info->filled |= STATION_INFO_ASSOC_REQ_IES;
 #endif
 			if (notify_new_sta)
-				cfg80211_new_sta(dev,
+				cfg80211_new_sta(&adapter->wdev,
 						 (const u8 *)&event->
 						 staMac.bytes[0],
 						 sta_info, GFP_KERNEL);
@@ -2705,7 +2705,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		 */
 		if ((adapter->device_mode != QDF_P2P_GO_MODE) ||
 		     (!cds_is_driver_recovering())) {
-			cfg80211_del_sta(dev,
+			cfg80211_del_sta(&adapter->wdev,
 					 (const u8 *)&sap_event->sapevt.
 					 sapStationDisassocCompleteEvent.staMac.
 					 bytes[0], GFP_KERNEL);
@@ -4141,7 +4141,7 @@ struct hdd_adapter *hdd_wlan_create_ap_dev(struct hdd_context *hdd_ctx,
 		(int)policy_mgr_get_concurrency_mode(hdd_ctx->psoc));
 
 	/* Init the net_device structure */
-	strlcpy(dev->name, (const char *)iface_name, IFNAMSIZ);
+	strscpy(dev->name, (const char *)iface_name, IFNAMSIZ);
 
 	hdd_set_ap_ops(dev);
 

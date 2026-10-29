@@ -430,6 +430,14 @@ extern char *dhd_log_dump_get_timestamp(void);
  * MSM defined CFG80211_DISCONNECTED_V2 as the flag
  * when they uses different kernel/cfg version.
  */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+void wl_cfg80211_invalidate_wiphy_events(struct wireless_dev *wdev);
+#define CFG80211_DISCONNECTED(dev, reason, ie, len, loc_gen, gfp) \
+	do { \
+		wl_cfg80211_invalidate_wiphy_events((dev)->ieee80211_ptr); \
+		cfg80211_disconnected(dev, reason, ie, len, loc_gen, gfp); \
+	} while (0)
+#else
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)) || (defined(CONFIG_ARCH_MSM) && \
 	defined(CFG80211_DISCONNECTED_V2))
 #define CFG80211_DISCONNECTED(dev, reason, ie, len, loc_gen, gfp) \
@@ -439,6 +447,7 @@ extern char *dhd_log_dump_get_timestamp(void);
 	BCM_REFERENCE(loc_gen); \
 	cfg80211_disconnected(dev, reason, ie, len, gfp);
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)) */
+#endif
 
 /* 0 invalidates all debug messages.  default is 1 */
 #define WL_DBG_LEVEL 0xFF
@@ -1275,6 +1284,11 @@ struct wl_eap_exp {
 typedef struct wl_eap_exp wl_eap_exp_t;
 
 struct net_info {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	u64 association_generation; /* protected by net_list_sync */
+	u32 wiphy_event_id; /* core identifier cached under net_list_sync */
+	bool wiphy_events_quiescing; /* protected by net_list_sync and wiphy_event_sync */
+#endif
 	struct net_device *ndev;
 	struct wireless_dev *wdev;
 	struct wl_profile profile;
@@ -1950,6 +1964,22 @@ typedef enum {
 } hal_state;
 
 /* private data of cfg80211 interface */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+struct wl_wiphy_event;
+typedef void (*wl_wiphy_event_func_t)(struct wiphy *, struct wl_wiphy_event *);
+
+struct wl_wiphy_event {
+	struct list_head list;
+	wl_wiphy_event_func_t deliver;
+	u64 generation;
+	u64 association_generation;
+	int link_id;
+	bool wake_held;
+	u32 wdev_id;
+	enum nl80211_iftype iftype;
+};
+#endif
+
 struct bcm_cfg80211 {
 	struct wireless_dev *wdev;	/* representing cfg cfg80211 device */
 
@@ -1969,6 +1999,16 @@ struct bcm_cfg80211 {
 	struct completion wait_next_af;
 	struct mutex usr_sync;	/* maily for up/down synchronization */
 	struct mutex if_sync;	/* maily for iface op synchronization */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Never acquire if_sync or wiphy mutex while holding this mutex. */
+	struct mutex wiphy_event_sync;
+	/* wiphy -> auth_event_sync -> wiphy_event_sync; FW holds if_sync first. */
+	struct mutex auth_event_sync;
+	struct wiphy_work wiphy_event_work;
+	struct list_head wiphy_events;
+	u64 wiphy_event_generation;
+	bool wiphy_events_stopped;
+#endif
 	struct mutex scan_sync;	/* scan sync from different scan contexts  */
 	wl_scan_results_v109_t *bss_list;
 	wl_scan_results_v109_t *scan_results;
@@ -2262,6 +2302,52 @@ struct bcm_cfg80211 {
 	/* to track the wiphy lock held context for deleting iface */
 	bool wiphy_lock_held;
 };
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/* May sleep; no RTNL/wiphy acquisition occurs while holding event_sync. */
+void wl_cfg80211_quiesce_wiphy_events(struct wireless_dev *wdev);
+void wl_cfg80211_resume_wiphy_events(struct wireless_dev *wdev);
+int wl_cfg80211_queue_ch_switch_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	const struct cfg80211_chan_def *chandef, unsigned int link_id);
+s32 wl_cfg80211_queue_wiphy_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
+	struct wl_wiphy_event *event, wl_wiphy_event_func_t func);
+
+/* Caller holds wiphy and event_sync; unregister barriers protect borrowed wdevs. */
+static inline struct wireless_dev *
+wl_cfg80211_event_wdev(struct wiphy *wiphy, const struct wl_wiphy_event *event)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct wireless_dev *wdev = NULL;
+	struct net_info *info;
+	unsigned long flags;
+
+	lockdep_assert_held(&wiphy->mtx);
+	lockdep_assert_held(&cfg->wiphy_event_sync);
+	if (cfg->wiphy_events_stopped || event->generation != cfg->wiphy_event_generation)
+		return NULL;
+
+	/* Legacy DHD unregister does not serialize the native wdev_list with wiphy. */
+	spin_lock_irqsave(&cfg->net_list_sync, flags);
+	list_for_each_entry(info, &cfg->net_list, list) {
+		struct wireless_dev *candidate;
+
+		/* Test before touching wdev: the entry may outlive its unregister. */
+		if (info->wiphy_events_quiescing || info->wiphy_event_id != event->wdev_id ||
+			info->association_generation != event->association_generation)
+			continue;
+		candidate = info->wdev;
+		if (candidate && candidate->identifier == event->wdev_id &&
+			candidate->registered && candidate->netdev &&
+			candidate->iftype == event->iftype) {
+			wdev = candidate;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&cfg->net_list_sync, flags);
+	return wdev;
+}
+#endif
+
 
 /* Max auth timeout allowed in case of EAP is 70sec, additional 5 sec for
 * inter-layer overheads
@@ -3291,8 +3377,11 @@ extern void wl_cfg80211_update_power_mode(struct net_device *dev);
 extern void wl_terminate_event_handler(struct net_device *dev);
 extern struct bcm_cfg80211 *wl_get_cfg(struct net_device *ndev);
 extern s32 wl_cfg80211_set_if_band(struct net_device *ndev, int band);
+/* RTNL-only entry and RTNL+wiphy entry, respectively. */
 extern s32 wl_cfg80211_set_country_code(struct net_device *dev, char *country_code,
         bool notify, bool user_enforced, int revinfo);
+s32 wl_cfg80211_set_country_code_locked(struct net_device *dev, char *country_code,
+	bool notify, bool user_enforced, int revinfo);
 extern uint8 wl_cfg80211_is_hal_started(struct bcm_cfg80211 *cfg);
 #ifdef WL_WIPSEVT
 extern int wl_cfg80211_wips_event(uint16 misdeauth, char* bssid);
@@ -3442,9 +3531,15 @@ int wl_get_rssi_logging(struct net_device *dev, void *param);
 int wl_set_rssi_logging(struct net_device *dev, void *param);
 int wl_get_rssi_per_ant(struct net_device *dev, char *ifname, char *peer_mac, void *param);
 #endif /* SUPPORT_RSSI_SUM_REPORT */
+/* RTNL-only entry and RTNL+wiphy entry, respectively. */
 struct wireless_dev * wl_cfg80211_add_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	wl_iftype_t wl_iftype, const char *name, const u8 *mac);
+struct wireless_dev *wl_cfg80211_add_if_locked(struct bcm_cfg80211 *cfg,
+	struct net_device *primary_ndev, wl_iftype_t wl_iftype, const char *name, const u8 *mac);
+/* RTNL-only entry and RTNL+wiphy entry, respectively. */
 extern s32 wl_cfg80211_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+	struct wireless_dev *wdev, char *name);
+extern s32 wl_cfg80211_del_if_locked(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *name);
 s32 _wl_cfg80211_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *ifname);
@@ -3683,8 +3778,10 @@ int wl_cfg80211_sroam_config(struct bcm_cfg80211 *cfg, struct net_device *dev, b
 int wl_cfg80211_get_roam_params(struct net_device *dev, uint32 *data, uint16 data_len, uint16 id);
 int wl_cfg80211_set_roam_params(struct net_device *dev, uint32 *data, uint16 data_len, uint16 id);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0))
 extern void wl_cfg80211_wdev_lock(struct wireless_dev *wdev);
 extern void wl_cfg80211_wdev_unlock(struct wireless_dev *wdev);
+#endif
 
 extern u8 *wl_get_up_table_netinfo(struct bcm_cfg80211 *cfg, struct net_device *ndev);
 extern void wl_store_up_table_netinfo(struct bcm_cfg80211 *cfg,

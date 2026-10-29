@@ -321,5 +321,12 @@ extern uint32 __dhd_dbg_pkt_hash(uintptr_t pkt, uint32 pktid);
 extern int dhd_cpkt_log_proc(dhd_pub_t *dhdp, char *buf, int buf_len,
         int bit_offset, int req_pkt_num);
 #endif  /* DHD_COMPACT_PKT_LOG */
+#ifdef DHD_PKT_LOGGING_DBGRING
+int dhd_pktlog_dump_write(dhd_pub_t *dhdp, void *file, const void *user_buf,
+	uint32 *written_bytes);
+#else
+int dhd_pktlog_dump_write(dhd_pub_t *dhdp, void *file, const void *user_buf, uint32 size);
+#endif
+
 #endif /* DHD_PKT_LOGGING */
 #endif /* __DHD_PKTLOG_H_ */

@@ -774,20 +774,23 @@ static int dp_rx_tm_thread_napi_poll(struct napi_struct *napi, int budget)
  * dp_rx_tm_thread_napi_init() - Initialize dummy rx_thread NAPI
  * @rx_thread: dp_rx_thread structure containing dummy napi and netdev
  *
- * Return: None
+ * Return: QDF status, including native allocation failure.
  */
-static void dp_rx_tm_thread_napi_init(struct dp_rx_thread *rx_thread)
+static QDF_STATUS dp_rx_tm_thread_napi_init(struct dp_rx_thread *rx_thread)
 {
 	/* Todo - optimize to use only one dummy netdev for all thread napis */
-	init_dummy_netdev(&rx_thread->netdev);
+	rx_thread->netdev = alloc_netdev_dummy(0);
+	if (!rx_thread->netdev)
+		return QDF_STATUS_E_NOMEM;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0))
-	netif_napi_add_weight(&rx_thread->netdev, &rx_thread->napi,
+	netif_napi_add_weight(rx_thread->netdev, &rx_thread->napi,
 			      dp_rx_tm_thread_napi_poll, 64);
 #else
-	netif_napi_add(&rx_thread->netdev, &rx_thread->napi,
+	netif_napi_add(rx_thread->netdev, &rx_thread->napi,
 		       dp_rx_tm_thread_napi_poll, 64);
 #endif
 	napi_enable(&rx_thread->napi);
+	return QDF_STATUS_SUCCESS;
 }
 
 /**
@@ -798,7 +801,10 @@ static void dp_rx_tm_thread_napi_init(struct dp_rx_thread *rx_thread)
  */
 static void dp_rx_tm_thread_napi_deinit(struct dp_rx_thread *rx_thread)
 {
+	napi_disable(&rx_thread->napi);
 	netif_napi_del(&rx_thread->napi);
+	free_netdev(rx_thread->netdev);
+	rx_thread->netdev = NULL;
 }
 
 /*
@@ -835,8 +841,11 @@ static QDF_STATUS dp_rx_tm_thread_init(struct dp_rx_thread *rx_thread,
 	dp_info("%s %u", thread_name, id);
 
 	if (cdp_cfg_get(dp_rx_tm_get_soc_handle(rx_thread->rtm_handle_cmn),
-			cfg_dp_gro_enable))
-		dp_rx_tm_thread_napi_init(rx_thread);
+			cfg_dp_gro_enable)) {
+		qdf_status = dp_rx_tm_thread_napi_init(rx_thread);
+		if (!QDF_IS_STATUS_SUCCESS(qdf_status))
+			return qdf_status;
+	}
 
 	rx_thread->task = qdf_create_thread(dp_rx_thread_loop,
 					    rx_thread, thread_name);
@@ -870,8 +879,7 @@ static QDF_STATUS dp_rx_tm_thread_deinit(struct dp_rx_thread *rx_thread)
 	qdf_event_destroy(&rx_thread->shutdown_event);
 	qdf_event_destroy(&rx_thread->vdev_del_event);
 
-	if (cdp_cfg_get(dp_rx_tm_get_soc_handle(rx_thread->rtm_handle_cmn),
-			cfg_dp_gro_enable))
+	if (rx_thread->netdev)
 		dp_rx_tm_thread_napi_deinit(rx_thread);
 
 	return QDF_STATUS_SUCCESS;
@@ -1294,7 +1302,7 @@ static QDF_STATUS dp_rx_tm_shutdown(struct dp_rx_tm_handle *rx_tm_hdl)
 	int i;
 
 	for (i = 0; i < rx_tm_hdl->num_dp_rx_threads; i++) {
-		if (!rx_tm_hdl->rx_thread[i])
+		if (!rx_tm_hdl->rx_thread[i] || !rx_tm_hdl->rx_thread[i]->task)
 			continue;
 		qdf_set_bit(RX_SHUTDOWN_EVENT,
 			    &rx_tm_hdl->rx_thread[i]->event_flag);
@@ -1305,7 +1313,7 @@ static QDF_STATUS dp_rx_tm_shutdown(struct dp_rx_tm_handle *rx_tm_hdl)
 
 
 	for (i = 0; i < rx_tm_hdl->num_dp_rx_threads; i++) {
-		if (!rx_tm_hdl->rx_thread[i])
+		if (!rx_tm_hdl->rx_thread[i] || !rx_tm_hdl->rx_thread[i]->task)
 			continue;
 		dp_debug("waiting for shutdown of thread %d", i);
 		qdf_wait_single_event(&rx_tm_hdl->rx_thread[i]->shutdown_event,

@@ -30,7 +30,7 @@
  * ie length to contain all the fragments with status BCME_BUFTOOSHORT.
  * out_len is in/out parameter, max length on input, used/required length on output
  */
-int
+static int
 bcm_tlv_dot11_defrag(const void *buf, uint buf_len, uint8 id, bool id_ext,
 	uint8 *out, uint *out_len)
 {

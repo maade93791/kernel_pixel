@@ -3024,11 +3024,19 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 
 int wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 				  struct wireless_dev *wdev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				  int radio_idx,
+#endif
 				  enum nl80211_tx_power_setting type,
 				  int mbm)
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	if (radio_idx != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_psoc_sync_op_start(wiphy_dev(wiphy), &psoc_sync);
 	if (errno)
@@ -3245,10 +3253,19 @@ static int __wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
 
 int wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
 					 struct wireless_dev *wdev,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				  int radio_idx,
+				  unsigned int link_id,
+#endif
 					 int *dbm)
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	if (radio_idx != -1 || link_id)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_psoc_sync_op_start(wiphy_dev(wiphy), &psoc_sync);
 	if (errno)

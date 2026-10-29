@@ -102,6 +102,7 @@ extern int dhd_bus_iovar_op(dhd_pub_t *dhdp, const char *name,
 
 /* Add bus dump output to a buffer */
 extern void dhd_bus_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf);
+void dhd_bus_pktq_flush(dhd_pub_t *dhdp);
 
 /* Clear any bus counters */
 extern void dhd_bus_clearcounts(dhd_pub_t *dhdp);
@@ -351,12 +352,15 @@ int dhd_bus_pwr_toggle(dhd_pub_t *dhdp, int reason);
 bool dhdpcie_is_btop_chip(struct dhd_bus *bus);
 bool dhdpcie_is_bt_loaded(struct dhd_bus *bus);
 int dhdpcie_redownload_fw(dhd_pub_t *dhdp);
-extern void dhd_bus_pcie_pwr_req_reload_war(struct dhd_bus *bus);
 int dhd_bus_perform_flr_with_quiesce(dhd_pub_t *dhdp, struct dhd_bus *bus,
 		bool init_deinit_path);
 #endif /* BT_OVER_PCIE */
 
 #ifdef BCMPCIE
+extern void dhd_bus_pcie_pwr_req_reload_war(struct dhd_bus *bus);
+#ifdef PWRSTATS_SYSFS
+uint64 dhdpcie_get_last_suspend_time(dhd_pub_t *dhdp);
+#endif
 extern void dhdpcie_advertise_bus_cleanup(dhd_pub_t  *dhdp);
 extern void dhd_msgbuf_iovar_timeout_dump(dhd_pub_t *dhd);
 extern void dhdpcie_induce_cbp_hang(dhd_pub_t *dhd);
@@ -368,6 +372,7 @@ extern void dhd_bwm_bt_quiesce(struct dhd_bus *bus);
 extern void dhd_bwm_bt_resume(struct dhd_bus *bus);
 
 #ifdef DHD_SSSR_DUMP
+void dhdpcie_fill_sssr_reg_info(dhd_pub_t *dhd);
 extern int dhd_bus_fis_trigger(dhd_pub_t *dhd);
 extern int dhd_bus_fis_dump(dhd_pub_t *dhd);
 #endif /* DHD_SSSR_DUMP */

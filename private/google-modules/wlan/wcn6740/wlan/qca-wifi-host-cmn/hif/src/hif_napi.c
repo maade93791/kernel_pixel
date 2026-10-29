@@ -76,16 +76,18 @@ static int hif_rxthread_napi_poll(struct napi_struct *napi, int budget)
  * hif_init_rx_thread_napi() - Initialize dummy Rx_thread NAPI
  * @napii: Handle to napi_info holding rx_thread napi
  *
- * Return: None
+ * Return: 0 on success, negative error on allocation failure.
  */
-static void hif_init_rx_thread_napi(struct qca_napi_info *napii)
+static int hif_init_rx_thread_napi(struct qca_napi_info *napii)
 {
-	struct qdf_net_if *nd = (struct qdf_net_if *)&napii->rx_thread_netdev;
+	napii->rx_thread_netdev = alloc_netdev_dummy(0);
+	if (!napii->rx_thread_netdev)
+		return -ENOMEM;
 
-	qdf_net_if_create_dummy_if(nd);
-	netif_napi_add_ni(&napii->rx_thread_netdev, &napii->rx_thread_napi,
-		       hif_rxthread_napi_poll, 64);
+	netif_napi_add_weight(napii->rx_thread_netdev, &napii->rx_thread_napi,
+			      hif_rxthread_napi_poll, 64);
 	napi_enable(&napii->rx_thread_napi);
+	return 0;
 }
 
 /**
@@ -96,11 +98,18 @@ static void hif_init_rx_thread_napi(struct qca_napi_info *napii)
  */
 static void hif_deinit_rx_thread_napi(struct qca_napi_info *napii)
 {
+	if (!napii->rx_thread_netdev)
+		return;
+
+	napi_disable(&napii->rx_thread_napi);
 	netif_napi_del(&napii->rx_thread_napi);
+	free_netdev(napii->rx_thread_netdev);
+	napii->rx_thread_netdev = NULL;
 }
 #else /* RECEIVE_OFFLOAD */
-static void hif_init_rx_thread_napi(struct qca_napi_info *napii)
+static int hif_init_rx_thread_napi(struct qca_napi_info *napii)
 {
+	return 0;
 }
 
 static void hif_deinit_rx_thread_napi(struct qca_napi_info *napii)
@@ -160,7 +169,8 @@ int hif_napi_create(struct hif_opaque_softc   *hif_ctx,
 		rc = hif_napi_cpu_init(hif_ctx);
 		if (rc != 0 && rc != -EALREADY) {
 			hif_err("NAPI_initialization failed(rc=%d)", rc);
-			rc = napid->ce_map;
+			qdf_spinlock_destroy(&napid->lock);
+			memset(napid, 0, sizeof(*napid));
 			goto hnc_err;
 		} else
 			rc = 0;
@@ -203,24 +213,29 @@ int hif_napi_create(struct hif_opaque_softc   *hif_ctx,
 		if (napii->irq < 0)
 			hif_warn("bad IRQ value for CE %d: %d", i, napii->irq);
 
-		qdf_net_if_create_dummy_if((struct qdf_net_if *)&napii->netdev);
+		napii->netdev = alloc_netdev_dummy(0);
+		if (!napii->netdev) {
+			rc = -ENOMEM;
+			goto napii_free;
+		}
 
 		NAPI_DEBUG("adding napi=%pK to netdev=%pK (poll=%pK, bdgt=%d)",
-			   &(napii->napi), &(napii->netdev), poll, budget);
-		netif_napi_add_ni(&(napii->netdev), &(napii->napi),
-				      poll, budget);
+			   &napii->napi, napii->netdev, poll, budget);
+		netif_napi_add_weight(napii->netdev, &napii->napi, poll, budget);
 
 		NAPI_DEBUG("after napi_add");
 		NAPI_DEBUG("napi=0x%pK, netdev=0x%pK",
-			   &(napii->napi), &(napii->netdev));
+			   &napii->napi, napii->netdev);
 		NAPI_DEBUG("napi.dev_list.prev=0x%pK, next=0x%pK",
 			   napii->napi.dev_list.prev,
 			   napii->napi.dev_list.next);
 		NAPI_DEBUG("dev.napi_list.prev=0x%pK, next=0x%pK",
-			   napii->netdev.napi_list.prev,
-			   napii->netdev.napi_list.next);
+			   napii->netdev->napi_list.prev,
+			   napii->netdev->napi_list.next);
 
-		hif_init_rx_thread_napi(napii);
+		rc = hif_init_rx_thread_napi(napii);
+		if (rc)
+			goto napii_free;
 		napii->lro_ctx = qdf_lro_init();
 		NAPI_DEBUG("Registering LRO for ce_id %d NAPI callback for %d lro_ctx %pK\n",
 				i, napii->id, napii->lro_ctx);
@@ -244,12 +259,25 @@ int hif_napi_create(struct hif_opaque_softc   *hif_ctx,
 	return napid->ce_map;
 
 napii_free:
+	/* Stop hotplug readers before releasing partially published contexts. */
+	hif_napi_cpu_deinit(hif_ctx);
 	for (i = 0; i < hif->ce_count; i++) {
 		napii = napid->napis[i];
 		napid->napis[i] = NULL;
-		if (napii)
-			qdf_mem_free(napii);
+		if (!napii)
+			continue;
+
+		hif_deinit_rx_thread_napi(napii);
+		if (napii->netdev) {
+			netif_napi_del(&napii->napi);
+			free_netdev(napii->netdev);
+		}
+		if (napii->lro_ctx)
+			qdf_lro_deinit(napii->lro_ctx);
+		qdf_mem_free(napii);
 	}
+	qdf_spinlock_destroy(&napid->lock);
+	memset(napid, 0, sizeof(*napid));
 
 hnc_err:
 	NAPI_DEBUG("<--napi_instances_map=%x]", napid->ce_map);
@@ -364,9 +392,9 @@ int hif_napi_destroy(struct hif_opaque_softc *hif_ctx,
 		}
 
 
-		if (hif->napi_data.state == HIF_NAPI_CONF_UP) {
+		if (hif->napi_data.state & HIF_NAPI_CONF_UP) {
 			if (force) {
-				napi_disable(&(napii->napi));
+				napi_disable(&napii->napi);
 				hif_debug("NAPI entry %d force disabled", id);
 				NAPI_DEBUG("NAPI %d force disabled", id);
 			} else {
@@ -380,11 +408,13 @@ int hif_napi_destroy(struct hif_opaque_softc *hif_ctx,
 				  napii->napi.dev_list.prev,
 				  napii->napi.dev_list.next);
 			NAPI_DEBUG("dev.napi_l.prv=0x%pK, next=0x%pK",
-				   napii->netdev.napi_list.prev,
-				   napii->netdev.napi_list.next);
+				   napii->netdev->napi_list.prev,
+				   napii->netdev->napi_list.next);
 
 			qdf_lro_deinit(napii->lro_ctx);
-			netif_napi_del(&(napii->napi));
+			netif_napi_del(&napii->napi);
+			free_netdev(napii->netdev);
+			napii->netdev = NULL;
 			hif_deinit_rx_thread_napi(napii);
 
 			napid->ce_map &= ~(0x01 << ce);
@@ -669,7 +699,7 @@ int hif_napi_event(struct hif_opaque_softc *hif_ctx, enum qca_napi_event event,
 			for (i = 0; i < CE_COUNT_MAX; i++) {
 				struct qca_napi_info *napii = napid->napis[i];
 				if (napii) {
-					napi = &(napii->napi);
+					napi = &napii->napi;
 					NAPI_DEBUG("%s: enabling NAPI %d",
 						   __func__, i);
 					napi_enable(napi);
@@ -680,7 +710,7 @@ int hif_napi_event(struct hif_opaque_softc *hif_ctx, enum qca_napi_event event,
 			for (i = 0; i < CE_COUNT_MAX; i++) {
 				struct qca_napi_info *napii = napid->napis[i];
 				if (napii) {
-					napi = &(napii->napi);
+					napi = &napii->napi;
 					NAPI_DEBUG("%s: disabling NAPI %d",
 						   __func__, i);
 					napi_disable(napi);
@@ -784,7 +814,7 @@ bool hif_napi_schedule(struct hif_opaque_softc *hif_ctx, int ce_id)
 				 NULL, NULL, 0, 0);
 	napii->stats[cpu].napi_schedules++;
 	NAPI_DEBUG("scheduling napi %d (ce:%d)", napii->id, ce_id);
-	napi_schedule(&(napii->napi));
+	napi_schedule(&napii->napi);
 
 	return true;
 }

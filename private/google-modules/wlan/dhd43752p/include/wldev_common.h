@@ -130,4 +130,14 @@ int wldev_get_mode(struct net_device *dev, uint8 *pband, uint8 caplen);
 int wldev_get_datarate(struct net_device *dev, int *datarate);
 int wldev_set_band(struct net_device *dev, uint band);
 
+int wl_iw_parse_data_tlv(char **list_str, void *dst, int dst_size, const char token,
+	int input_size, int *bytes_left);
+
+int wl_iw_parse_channel_list_tlv(char **list_str, uint16 *channel_list, int channel_num,
+	int *bytes_left);
+
+int wl_iw_parse_ssid_list(char **list_str, wlc_ssid_t *ssid, int idx, int max);
+
+int wl_iw_parse_channel_list(char **list_str, uint16 *channel_list, int channel_num);
+
 #endif /* __WLDEV_COMMON_H__ */

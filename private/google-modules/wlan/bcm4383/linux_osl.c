@@ -932,7 +932,7 @@ osl_debug_malloc(osl_t *osh, uint size, int line, const char* file)
 	if (!basename)
 		basename = file;
 
-	strlcpy(p->file, basename, sizeof(p->file));
+	strscpy(p->file, basename, sizeof(p->file));
 
 	/* link this block */
 	if (osh) {
@@ -1052,7 +1052,7 @@ osl_debug_vmalloc(osl_t *osh, uint size, int line, const char* file)
 	if (!basename)
 		basename = file;
 
-	strlcpy(p->file, basename, sizeof(p->file));
+	strscpy(p->file, basename, sizeof(p->file));
 
 	/* link this block */
 	if (osh) {
@@ -1164,7 +1164,7 @@ osl_debug_kvmalloc(osl_t *osh, uint size, int line, const char* file)
 	if (!basename)
 		basename = file;
 
-	strlcpy(p->file, basename, sizeof(p->file));
+	strscpy(p->file, basename, sizeof(p->file));
 
 	/* link this block */
 	if (osh) {

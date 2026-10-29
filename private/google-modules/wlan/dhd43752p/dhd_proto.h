@@ -137,6 +137,9 @@ extern int dhd_prot_iovar_op(dhd_pub_t *dhdp, const char *name,
 
 /* Add prot dump output to a buffer */
 extern void dhd_prot_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf);
+void dhd_prot_clearcounts(dhd_pub_t *dhd);
+void dhd_msgbuf_delay_post_ts_bufs(dhd_pub_t *dhd);
+void dhd_prot_clean_flow_ring(dhd_pub_t *dhd, void *msgbuf_flow_info);
 
 /* Dump extended trap data */
 extern int dhd_prot_dump_extended_trap(dhd_pub_t *dhdp, struct bcmstrbuf *b, bool raw);

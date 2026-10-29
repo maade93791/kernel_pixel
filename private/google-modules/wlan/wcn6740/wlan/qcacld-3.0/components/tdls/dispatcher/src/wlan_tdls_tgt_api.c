@@ -309,8 +309,6 @@ QDF_STATUS tgt_tdls_mgmt_frame_process_rx_cb(
 		qdf_mem_free(rx_mgmt_event);
 	}
 
-	qdf_nbuf_free(buf);
-
 	return status;
 }
 
@@ -331,7 +329,8 @@ QDF_STATUS tgt_tdls_mgmt_frame_rx_cb(
 		return QDF_STATUS_E_INVAL;
 	}
 
-	if (!mgmt_rx_params || !psoc) {
+	if (!mgmt_rx_params || !psoc ||
+	    mgmt_rx_params->buf_len > qdf_nbuf_len(buf)) {
 		tdls_err("input is NULL mgmt_rx_params:%pK psoc:%pK, peer:%pK",
 			  mgmt_rx_params, psoc, peer);
 		status = QDF_STATUS_E_INVAL;
@@ -342,14 +341,14 @@ QDF_STATUS tgt_tdls_mgmt_frame_rx_cb(
 	if (QDF_STATUS_SUCCESS != status)
 		goto release_nbuf;
 
+	/* The processing helper copies the frame; this callback owns the skb. */
 	status = tgt_tdls_mgmt_frame_process_rx_cb(psoc, peer, buf,
 						   mgmt_rx_params, frm_type);
 
 	wlan_objmgr_peer_release_ref(peer, WLAN_TDLS_SB_ID);
 
-	if (QDF_STATUS_SUCCESS != status)
 release_nbuf:
-		qdf_nbuf_free(buf);
+	qdf_nbuf_free(buf);
 	return status;
 }
 

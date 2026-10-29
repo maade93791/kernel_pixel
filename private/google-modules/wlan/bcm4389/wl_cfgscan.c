@@ -650,7 +650,7 @@ wl_cfg80211_add_iw_ie(struct bcm_cfg80211 *cfg, struct net_device *ndev, s32 bss
 		WL_ERR(("Error allocating buffer for IE\n"));
 		return -ENOMEM;
 	}
-	strlcpy(ie_setbuf->cmd, "add", sizeof(ie_setbuf->cmd));
+	strscpy(ie_setbuf->cmd, "add", sizeof(ie_setbuf->cmd));
 
 	/* Buffer contains only 1 IE */
 	ie_setbuf->ie_buffer.iecount = htod32(1);
@@ -4694,7 +4694,11 @@ wl_priortize_scan_over_listen(struct bcm_cfg80211 *cfg,
 #if defined(WL_CFG80211_P2P_DEV_IF)
 s32
 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
-	struct ieee80211_channel *channel, unsigned int duration, u64 *cookie)
+	struct ieee80211_channel *channel, unsigned int duration, u64 *cookie
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	, const u8 *rx_addr
+#endif
+)
 #else
 s32
 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
@@ -4710,6 +4714,11 @@ wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	struct wireless_dev *wdev;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* ROC address filtering is not advertised or implemented. */
+	if (rx_addr)
+		return -EOPNOTSUPP;
+#endif
 	RETURN_EIO_IF_NOT_UP(cfg);
 
 #if defined(WL_CFG80211_P2P_DEV_IF)

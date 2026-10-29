@@ -143,6 +143,10 @@ typedef struct dhd_info {
 	struct wakeup_source *wl_nanwake; /* NAN wakelock */
 #endif /* CONFIG_HAS_WAKELOCK */
 
+	/* One-way process-interface admission gate during whole-device detach. */
+	bool if_lifecycle_stopping;
+	bool if_lifecycle_draining; /* reversible primary-stop join gate */
+
 #if defined(OEM_ANDROID)
 	/* net_device interface lock, prevent race conditions among net_dev interface
 	 * calls and wifi_on or wifi_off

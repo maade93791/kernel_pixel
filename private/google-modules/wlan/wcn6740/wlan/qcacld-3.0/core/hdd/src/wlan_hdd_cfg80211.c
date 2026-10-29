@@ -7003,7 +7003,7 @@ __wlan_hdd_cfg80211_get_wifi_info(struct wiphy *wiphy,
 
 	if (tb_vendor[QCA_WLAN_VENDOR_ATTR_WIFI_INFO_DRIVER_VERSION]) {
 		hdd_debug("Rcvd req for Driver version");
-		strlcpy(driver_version, QWLAN_VERSIONSTR,
+		strscpy(driver_version, QWLAN_VERSIONSTR,
 			sizeof(driver_version));
 		skb_len += strlen(driver_version) + 1;
 		count++;
@@ -20195,13 +20195,25 @@ static int wlan_hdd_cfg80211_add_key(struct wiphy *wiphy,
 }
 #elif defined(CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT)
 static int wlan_hdd_cfg80211_add_key(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				     struct wireless_dev *wdev,
+#else
 				     struct net_device *ndev,
+#endif
 				     int link_id, u8 key_index, bool pairwise,
 				     const u8 *mac_addr,
 				     struct key_params *params)
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *ndev = wdev->netdev;
+
+	if (!ndev)
+		return -EINVAL;
+	if (link_id != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(ndev, &vdev_sync);
 	if (errno)
@@ -20359,7 +20371,11 @@ static int wlan_hdd_cfg80211_get_key(struct wiphy *wiphy,
 }
 #elif defined(CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT)
 static int wlan_hdd_cfg80211_get_key(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				     struct wireless_dev *wdev,
+#else
 				     struct net_device *ndev,
+#endif
 				     int link_id, u8 key_index, bool pairwise,
 				     const u8 *mac_addr, void *cookie,
 				     void (*callback)(void *cookie,
@@ -20368,6 +20384,14 @@ static int wlan_hdd_cfg80211_get_key(struct wiphy *wiphy,
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *ndev = wdev->netdev;
+
+	if (!ndev)
+		return -EINVAL;
+	if (link_id != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(ndev, &vdev_sync);
 	if (errno)
@@ -20476,12 +20500,24 @@ static int wlan_hdd_cfg80211_del_key(struct wiphy *wiphy,
 }
 #elif defined(CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT)
 static int wlan_hdd_cfg80211_del_key(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				     struct wireless_dev *wdev,
+#else
 				     struct net_device *dev,
+#endif
 				     int link_id, u8 key_index,
 				     bool pairwise, const u8 *mac_addr)
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *dev = wdev->netdev;
+
+	if (!dev)
+		return -EINVAL;
+	if (link_id != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(dev, &vdev_sync);
 	if (errno)
@@ -20639,6 +20675,11 @@ static int wlan_hdd_cfg80211_set_default_key(struct wiphy *wiphy,
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	if (link_id != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(ndev, &vdev_sync);
 	if (errno)
@@ -20710,11 +20751,23 @@ static int wlan_hdd_cfg80211_set_default_beacon_key(struct wiphy *wiphy,
 }
 #elif defined(CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT)
 static int wlan_hdd_cfg80211_set_default_beacon_key(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+						    struct wireless_dev *wdev,
+#else
 						    struct net_device *ndev,
+#endif
 						    int link_id, u8 key_index)
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *ndev = wdev->netdev;
+
+	if (!ndev)
+		return -EINVAL;
+	if (link_id != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(ndev, &vdev_sync);
 	if (errno)
@@ -20990,10 +21043,21 @@ static int __wlan_hdd_cfg80211_set_wiphy_params(struct wiphy *wiphy,
  *
  * Return: 0 for success, non-zero for failure
  */
-static int wlan_hdd_cfg80211_set_wiphy_params(struct wiphy *wiphy, u32 changed)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static int wlan_hdd_cfg80211_set_wiphy_params(struct wiphy *wiphy,
+					      int radio_idx, u32 changed)
+#else
+static int wlan_hdd_cfg80211_set_wiphy_params(struct wiphy *wiphy,
+					      u32 changed)
+#endif
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	if (radio_idx != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_psoc_sync_op_start(wiphy_dev(wiphy), &psoc_sync);
 	if (errno)
@@ -21058,11 +21122,23 @@ static int wlan_hdd_set_default_mgmt_key(struct wiphy *wiphy,
 }
 #elif defined(CFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT)
 static int wlan_hdd_set_default_mgmt_key(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+					 struct wireless_dev *wdev,
+#else
 					 struct net_device *netdev,
+#endif
 					 int link_id, u8 key_index)
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *netdev = wdev->netdev;
+
+	if (!netdev)
+		return -EINVAL;
+	if (link_id != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(netdev, &vdev_sync);
 	if (errno)
@@ -23025,6 +23101,7 @@ int wlan_hdd_change_hw_mode_for_given_chnl(struct hdd_adapter *adapter,
  * Return: 0 success or error code on failure.
  */
 static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
+				       struct net_device *dev,
 				       struct cfg80211_chan_def *chandef)
 {
 	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
@@ -23050,9 +23127,16 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 
 	mac_handle = hdd_ctx->mac_handle;
 
-	adapter = hdd_get_adapter(hdd_ctx, QDF_MONITOR_MODE);
-	if (!adapter)
-		return -EIO;
+	if (dev) {
+		adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+		if (hdd_validate_adapter(adapter) ||
+		    adapter->device_mode != QDF_MONITOR_MODE)
+			return -EINVAL;
+	} else {
+		adapter = hdd_get_adapter(hdd_ctx, QDF_MONITOR_MODE);
+		if (!adapter)
+			return -EIO;
+	}
 
 	hdd_debug("%s: set monitor mode freq %d",
 		  adapter->dev->name, chandef->chan->center_freq);
@@ -23181,6 +23265,9 @@ static int __wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
  * Return: 0 success or error code on failure.
  */
 static int wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				       struct net_device *dev,
+#endif
 				       struct cfg80211_chan_def *chandef)
 {
 	struct osif_psoc_sync *psoc_sync;
@@ -23190,7 +23277,11 @@ static int wlan_hdd_cfg80211_set_mon_ch(struct wiphy *wiphy,
 	if (errno)
 		return errno;
 
-	errno = __wlan_hdd_cfg80211_set_mon_ch(wiphy, chandef);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	errno = __wlan_hdd_cfg80211_set_mon_ch(wiphy, dev, chandef);
+#else
+	errno = __wlan_hdd_cfg80211_set_mon_ch(wiphy, NULL, chandef);
+#endif
 
 	osif_psoc_sync_op_stop(psoc_sync);
 
@@ -23880,11 +23971,19 @@ static int __wlan_hdd_cfg80211_set_chainmask(struct wiphy *wiphy,
 }
 
 static int wlan_hdd_cfg80211_set_chainmask(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+					   int radio_idx,
+#endif
 					   uint32_t tx_mask,
 					   uint32_t rx_mask)
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	if (radio_idx != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_psoc_sync_op_start(wiphy_dev(wiphy), &psoc_sync);
 	if (errno)
@@ -23926,11 +24025,19 @@ static int __wlan_hdd_cfg80211_get_chainmask(struct wiphy *wiphy,
 }
 
 static int wlan_hdd_cfg80211_get_chainmask(struct wiphy *wiphy,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+					   int radio_idx,
+#endif
 					   uint32_t *tx_mask,
 					   uint32_t *rx_mask)
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	if (radio_idx != -1)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_psoc_sync_op_start(wiphy_dev(wiphy), &psoc_sync);
 	if (errno)
@@ -24500,13 +24607,103 @@ bool wlan_hdd_cfg80211_rx_control_port(struct net_device *dev,
  * @key_mgmt_set_pmk = Set pmk key management
  * @update_connect_params = Update connect params
  */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static int wlan_hdd_native_change_beacon(struct wiphy *wiphy,
+					 struct net_device *dev,
+					 struct cfg80211_ap_update *update)
+{
+	if (update->fils_discovery.update ||
+	    update->unsol_bcast_probe_resp.update ||
+	    update->s1g_short_beacon.update)
+		return -EOPNOTSUPP;
+
+	return wlan_hdd_cfg80211_change_beacon(wiphy, dev, &update->beacon);
+}
+
+static int wlan_hdd_native_change_station(struct wiphy *wiphy,
+					  struct wireless_dev *wdev,
+					  const u8 *mac,
+					  struct station_parameters *params)
+{
+	if (!wdev->netdev)
+		return -EINVAL;
+
+	return wlan_hdd_change_station(wiphy, wdev->netdev, mac, params);
+}
+
+static int wlan_hdd_native_add_station(struct wiphy *wiphy,
+				       struct wireless_dev *wdev,
+				       const u8 *mac,
+				       struct station_parameters *params)
+{
+	if (!wdev->netdev)
+		return -EINVAL;
+
+	return wlan_hdd_cfg80211_add_station(wiphy, wdev->netdev, mac, params);
+}
+
+static int wlan_hdd_native_del_station(struct wiphy *wiphy,
+				       struct wireless_dev *wdev,
+				       struct station_del_parameters *params)
+{
+	if (!wdev->netdev)
+		return -EINVAL;
+
+	return wlan_hdd_cfg80211_del_station(wiphy, wdev->netdev, params);
+}
+
+static int wlan_hdd_native_get_station(struct wiphy *wiphy,
+				       struct wireless_dev *wdev,
+				       const u8 *mac, struct station_info *sinfo)
+{
+	if (!wdev->netdev)
+		return -EINVAL;
+
+	return wlan_hdd_cfg80211_get_station(wiphy, wdev->netdev, mac, sinfo);
+}
+
+static int wlan_hdd_native_dump_station(struct wiphy *wiphy,
+					struct wireless_dev *wdev, int idx,
+					u8 *mac, struct station_info *sinfo)
+{
+	if (!wdev->netdev)
+		return -EINVAL;
+
+	return wlan_hdd_cfg80211_dump_station(wiphy, wdev->netdev, idx, mac,
+					    sinfo);
+}
+#endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+static int wlan_hdd_native_remain_on_channel(struct wiphy *wiphy,
+					     struct wireless_dev *wdev,
+					     struct ieee80211_channel *chan,
+					     unsigned int duration, u64 *cookie,
+					     const u8 *rx_addr)
+{
+	if (rx_addr)
+		return -EOPNOTSUPP;
+
+	return wlan_hdd_cfg80211_remain_on_channel(wiphy, wdev, chan, duration,
+						 cookie);
+}
+#endif
+
 static struct cfg80211_ops wlan_hdd_cfg80211_ops = {
 	.add_virtual_intf = wlan_hdd_add_virtual_intf,
 	.del_virtual_intf = wlan_hdd_del_virtual_intf,
 	.change_virtual_intf = wlan_hdd_cfg80211_change_iface,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.change_station = wlan_hdd_native_change_station,
+#else
 	.change_station = wlan_hdd_change_station,
+#endif
 	.start_ap = wlan_hdd_cfg80211_start_ap,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.change_beacon = wlan_hdd_native_change_beacon,
+#else
 	.change_beacon = wlan_hdd_cfg80211_change_beacon,
+#endif
 	.stop_ap = wlan_hdd_cfg80211_stop_ap,
 	.change_bss = wlan_hdd_cfg80211_change_bss,
 	.add_key = wlan_hdd_cfg80211_add_key,
@@ -24519,7 +24716,11 @@ static struct cfg80211_ops wlan_hdd_cfg80211_ops = {
 	.set_wiphy_params = wlan_hdd_cfg80211_set_wiphy_params,
 	.set_tx_power = wlan_hdd_cfg80211_set_txpower,
 	.get_tx_power = wlan_hdd_cfg80211_get_txpower,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.remain_on_channel = wlan_hdd_native_remain_on_channel,
+#else
 	.remain_on_channel = wlan_hdd_cfg80211_remain_on_channel,
+#endif
 	.cancel_remain_on_channel = wlan_hdd_cfg80211_cancel_remain_on_channel,
 	.mgmt_tx = wlan_hdd_mgmt_tx,
 	.mgmt_tx_cancel_wait = wlan_hdd_cfg80211_mgmt_tx_cancel_wait,
@@ -24529,11 +24730,27 @@ static struct cfg80211_ops wlan_hdd_cfg80211_ops = {
 	.set_default_beacon_key = wlan_hdd_cfg80211_set_default_beacon_key,
 #endif
 	.set_txq_params = wlan_hdd_set_txq_params,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.dump_station = wlan_hdd_native_dump_station,
+#else
 	.dump_station = wlan_hdd_cfg80211_dump_station,
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.get_station = wlan_hdd_native_get_station,
+#else
 	.get_station = wlan_hdd_cfg80211_get_station,
+#endif
 	.set_power_mgmt = wlan_hdd_cfg80211_set_power_mgmt,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.del_station = wlan_hdd_native_del_station,
+#else
 	.del_station = wlan_hdd_cfg80211_del_station,
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	.add_station = wlan_hdd_native_add_station,
+#else
 	.add_station = wlan_hdd_cfg80211_add_station,
+#endif
 	.set_pmksa = wlan_hdd_cfg80211_set_pmksa,
 	.del_pmksa = wlan_hdd_cfg80211_del_pmksa,
 	.flush_pmksa = wlan_hdd_cfg80211_flush_pmksa,

@@ -33,24 +33,6 @@
 struct qdf_net_if;
 
 /**
- * __qdf_net_if_create_dummy_if() - create dummy interface
- * @nif: interface handle
- *
- * This function will create a dummy network interface
- *
- * Return: QDF_STATUS_SUCCESS on success
- */
-static inline QDF_STATUS
-__qdf_net_if_create_dummy_if(struct qdf_net_if *nif)
-{
-	int ret;
-
-	ret = init_dummy_netdev((struct net_device *)nif);
-
-	return qdf_status_from_os_return(ret);
-}
-
-/**
  * qdf_net_if_get_dev_by_name() - Find a network device by its name
  * @nif_name: network device name
  *
