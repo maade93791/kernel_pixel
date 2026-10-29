@@ -33,6 +33,7 @@
 #include <backend/gpu/mali_kbase_model_linux.h>
 
 #include <mali_kbase.h>
+#include <mali_kbase_mem_migrate.h>
 #include <mali_kbase_io.h>
 #include <backend/gpu/mali_kbase_irq_internal.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
@@ -366,6 +367,8 @@ static const struct kbase_device_init dev_init[] = {
 
 static void kbase_device_term_partial(struct kbase_device *kbdev, unsigned int i)
 {
+	/* Existing transactions still need the intact GPU and MMU. */
+	kbase_mem_migrate_quiesce(kbdev);
 	while (i-- > 0) {
 		if (dev_init[i].term)
 			dev_init[i].term(kbdev);

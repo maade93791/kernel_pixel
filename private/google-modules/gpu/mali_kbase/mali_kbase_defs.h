@@ -65,6 +65,7 @@
 #include <linux/debugfs.h>
 #include <linux/regulator/consumer.h>
 #include <linux/rtmutex.h>
+#include <linux/wait.h>
 
 /**
  * Multiplier on kernel timeout constants, useful for emulation
@@ -766,6 +767,15 @@ struct kbase_process {
  *                    for page migration purposes.
  */
 struct kbase_mem_migrate {
+	/* Close admission and drain full transactions before resource teardown. */
+	spinlock_t state_lock;
+	wait_queue_head_t wait;
+	unsigned int active_users;
+	unsigned int isolated_pages;
+	atomic_t metadata_pages;
+	bool quiescing;
+	bool initialized;
+	bool enabled;
 	struct list_head free_pages_list;
 	spinlock_t free_pages_lock;
 	struct workqueue_struct *free_pages_workq;

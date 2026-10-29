@@ -14,8 +14,11 @@ KBUILD_OPTIONS += CONFIG_MALI_PIXEL_GPU_SLC=y
 
 KBUILD_OPTIONS += $(KBUILD_EXTRA) # Extra config if any
 
-EXTRA_CFLAGS += -I$(M)
-EXTRA_CFLAGS += -I$(M)/../common/include
+# Kleaf passes relative M paths from KERNEL_SRC, while Kbuild may compile
+# from a separate output directory. Keep include paths tied to the sources.
+mali_pixel_src := $(realpath $(if $(filter /%,$(M)),$(M),$(KERNEL_SRC)/$(M)))
+EXTRA_CFLAGS += -I$(mali_pixel_src)
+EXTRA_CFLAGS += -I$(mali_pixel_src)/../common/include
 
 include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 

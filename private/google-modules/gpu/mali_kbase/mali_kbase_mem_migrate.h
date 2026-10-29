@@ -102,8 +102,19 @@ void kbase_mem_migrate_set_address_space_ops(struct kbase_device *kbdev, struct 
  * Enables page migration by default based on GPU and setup work queue to
  * defer freeing pages during page migration callbacks.
  * This function must be called only when a kbase device is initialized.
+ *
+ * Return: zero on success, or -ENOMEM if the deferred worker cannot be created.
  */
-void kbase_mem_migrate_init(struct kbase_device *kbdev);
+int kbase_mem_migrate_init(struct kbase_device *kbdev);
+
+/* Module provider registration is separate from per-device state. */
+int kbase_mem_migrate_register(void);
+void kbase_mem_migrate_unregister(void);
+
+/* Sleepable: close allocation/isolation admission, then drain transactions.
+ * Call before destroying any GPU/MMU resources; do not hold their locks.
+ */
+void kbase_mem_migrate_quiesce(struct kbase_device *kbdev);
 
 /*
  * kbase_mem_migrate_term - Terminate kbase page migration
