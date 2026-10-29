@@ -47,7 +47,7 @@
 #include <linux/uaccess.h>
 #include <linux/export.h>
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 
 #include <soc/google/exynos_pm_qos.h>
 #include "cal-if/acpm_dvfs.h"

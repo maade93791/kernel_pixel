@@ -18,7 +18,7 @@
 #include <soc/google/ect_parser.h>
 #include <dt-bindings/soc/google/zuma-devfreq.h>
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 #include "governor.h"
 #include "governor_memlat.h"
 #include "arm-memlat-mon.h"

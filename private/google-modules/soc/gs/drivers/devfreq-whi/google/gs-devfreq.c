@@ -31,7 +31,7 @@
 #include <soc/google/bts.h>
 #include <linux/of_platform.h>
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 #include <trace/hooks/systrace.h>
 #include <dt-bindings/soc/google/gs101-devfreq.h>
 #include "../../soc/google/cal-if/acpm_dvfs.h"

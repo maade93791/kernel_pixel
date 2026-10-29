@@ -31,7 +31,7 @@
 #include <trace/hooks/systrace.h>
 
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 
 #include "exynos-acme.h"
 #if IS_ENABLED(CONFIG_SOC_ZUMA)

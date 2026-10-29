@@ -13,10 +13,7 @@
 #endif
 
 #include <soc/google/pwrcal-env.h>
-#define CREATE_TRACE_POINTS
-#include <trace/events/gs_clock_rate.h>
-#undef CREATE_TRACE_POINTS
-EXPORT_TRACEPOINT_SYMBOL_GPL(clock_set_rate);
+#include <trace/events/power.h>
 
 
 #include "pwrcal-rae.h"

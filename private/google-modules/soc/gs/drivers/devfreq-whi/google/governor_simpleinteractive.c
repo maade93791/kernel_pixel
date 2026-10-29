@@ -24,7 +24,7 @@
 #include <linux/devfreq.h>
 #include <soc/google/exynos-devfreq.h>
 #include <trace/events/power.h>
-#include <trace/events/gs_clock_rate.h>
+#include <trace/events/power.h>
 #include <uapi/linux/sched/types.h>
 
 #include "dvfs_events.h"

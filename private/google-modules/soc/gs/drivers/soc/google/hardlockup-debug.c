@@ -514,7 +514,7 @@ static int hardlockup_debugger_probe(struct platform_device *pdev)
 
 	if (hardlockup_param->last_pc_addr) {
 #ifdef SMC_CMD_LOCKUP_NOTICE
-		ret = register_trace_android_rvh_arm64_unknown_brk(
+		ret = register_trace_android_rvh_do_el1_brk(
 			hardlockup_debug_brk, NULL);
 		if (ret)
 			goto error;
