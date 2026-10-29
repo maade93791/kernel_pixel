@@ -5,7 +5,7 @@ KBUILD_OPTIONS	+= CONFIG_TOUCHSCREEN_FST2=m
 EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE
 EXTRA_CFLAGS	+= -DCONFIG_GOOG_TOUCH_INTERFACE
 
-EXTRA_SYMBOLS   += $(COMMON_OUT_DIR)/private/google-modules/touch/common/Module.symvers
+EXTRA_SYMBOLS   += $(COMMON_OUT_DIR)/private/google-modules/touch/common/v1/Module.symvers
 
 include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 

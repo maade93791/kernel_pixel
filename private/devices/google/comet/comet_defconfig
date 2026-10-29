@@ -14,7 +14,7 @@ CONFIG_CH_EXTENSION=m
 CONFIG_CP_THERMAL=m
 CONFIG_CP_PMIC=m
 
-# private/google-modules/touch/common/Kconfig
+# private/google-modules/touch/common/v1/Kconfig
 CONFIG_TOUCHSCREEN_TBN=m
 CONFIG_TOUCHSCREEN_TBN_AOC_CHANNEL_MODE=y
 CONFIG_TOUCHSCREEN_OFFLOAD=m

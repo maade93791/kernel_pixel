@@ -2,7 +2,7 @@ KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 M ?= $(shell pwd)
 
 EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE
-EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/v1/Module.symvers
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \

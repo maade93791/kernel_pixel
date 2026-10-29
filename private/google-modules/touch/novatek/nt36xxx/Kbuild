@@ -2,9 +2,9 @@
 
 ccflags-y += -I$(ROOT_DIR)/private/google-modules/display
 ccflags-y += -I$(ROOT_DIR)/private/google-modules/display/samsung/include/uapi
-ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common
-ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common/include
-ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common/usi
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common/v1
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common/v1/include
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common/v1/usi
 
 ifneq ($(CONFIG_TOUCHSCREEN_SPI_FLASH),)
 ccflags-y += -DSPI_FLASH=1

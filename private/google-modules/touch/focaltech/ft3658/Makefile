@@ -10,7 +10,7 @@ EXTRA_CFLAGS	+= -DCONFIG_TOUCHSCREEN_PANEL_BRIDGE
 EXTRA_CFLAGS	+= -DCONFIG_TOUCHSCREEN_TBN
 EXTRA_CFLAGS	+= -DCONFIG_TOUCHSCREEN_HEATMAP
 EXTRA_CFLAGS	+= -DCONFIG_TOUCHSCREEN_OFFLOAD
-EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/v1/Module.symvers
 
 include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 

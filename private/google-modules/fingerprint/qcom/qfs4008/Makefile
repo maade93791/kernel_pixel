@@ -5,7 +5,7 @@ EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/fingerprint/qcom/qfs4008
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/fingerprint/qcom/qfs4008
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/gs/soc/include
 
-EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/touch/common/v1/Module.symvers
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \

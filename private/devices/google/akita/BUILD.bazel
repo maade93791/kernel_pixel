@@ -31,9 +31,9 @@ device_build(
         "//private/google-modules/gps/broadcom/bcm47765",
         "//private/google-modules/nfc",
         "//private/google-modules/radio/samsung/s5300:cpif",
-        "//private/google-modules/touch/common:touch.common",
+        "//private/google-modules/touch/common/v1:touch.common",
         "//private/google-modules/touch/goodix",
-        "//private/google-modules/wlan/bcm4383:bcmdhd4383",
+        "//private/google-modules/wlan/bcmdhd/bcm4383:bcmdhd4383",
         "//private/google-modules/wlan/wonder:wonder",
     ],
     insmod_cfgs = glob(["insmod_cfg/*.cfg"]),
@@ -41,7 +41,7 @@ device_build(
     kconfigs = [
         # keep sorted
         "//private/google-modules/radio/samsung/s5300:cpif.kconfig",
-        "//private/google-modules/touch/common:touch.common.kconfig",
+        "//private/google-modules/touch/common/v1:touch.common.kconfig",
     ],
     module_outs = ZUMA_MODULE_OUTS,
     vendor_dlkm_modules_blocklists = ["vendor_dlkm.blocklist.akita"],

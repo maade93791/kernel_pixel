@@ -7,6 +7,6 @@ filegroup(
         "**/*.c",
     ]),
     visibility = [
-        "//private/google-modules/wlan/wcn6740/wlan/qcacld-3.0:__pkg__",
+        "//private/google-modules/wlan/qcom/wcn6740/wlan/qcacld-3.0:__pkg__",
     ],
 )
