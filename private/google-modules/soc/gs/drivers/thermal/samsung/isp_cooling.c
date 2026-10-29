@@ -17,8 +17,6 @@
 #include <soc/google/ect_parser.h>
 #endif
 
-#include <thermal_core.h>
-
 /**
  * struct isp_cooling_device - data for cooling device with isp
  * @id: unique integer value corresponding to each isp_cooling_device
@@ -338,29 +336,52 @@ int exynos_tmu_isp_add_notifier(struct notifier_block *n)
 }
 EXPORT_SYMBOL_GPL(exynos_tmu_isp_add_notifier);
 
+struct ect_cooling_level {
+	struct thermal_cooling_device *cdev;
+	int trip;
+	unsigned long upper;
+};
+
+static int set_ect_cooling_level(struct thermal_zone_device *tz,
+				 struct thermal_instance *instance, void *arg)
+{
+	struct ect_cooling_level *level = arg;
+	int ret;
+
+	if (thermal_instance_cdev(instance) != level->cdev)
+		return 0;
+
+	/* A negative trip only checks that the cooling device is bound. */
+	if (level->trip < 0)
+		return 1;
+
+	if (thermal_instance_trip_id(tz, instance) != level->trip)
+		return 0;
+
+	ret = thermal_instance_set_upper(tz, instance, level->upper);
+	return ret ?: 1;
+}
+
 static int parse_ect_cooling_level(struct thermal_cooling_device *cdev,
 				   char *cooling_name)
 {
-	struct thermal_instance *instance;
+	struct ect_cooling_level binding = {
+		.cdev = cdev,
+		.trip = -1,
+	};
 	struct thermal_zone_device *tz;
-	bool foundtz = false;
 	void *thermal_block;
 	struct ect_ap_thermal_function *function;
-	int i, temperature;
+	int i, ret, temperature;
 	unsigned int freq;
 
-	mutex_lock(&cdev->lock);
-	list_for_each_entry(instance, &cdev->thermal_instances, cdev_node) {
-		tz = instance->tz;
-		if (!strncasecmp(cooling_name, tz->type, THERMAL_NAME_LENGTH)) {
-			foundtz = true;
-			break;
-		}
-	}
-	mutex_unlock(&cdev->lock);
+	tz = thermal_zone_get_zone_by_name(cooling_name);
+	if (IS_ERR(tz))
+		return 0;
 
-	if (!foundtz)
-		goto skip_ect;
+	ret = thermal_zone_for_each_cooling_binding(tz, set_ect_cooling_level, &binding);
+	if (ret <= 0)
+		return 0;
 
 	thermal_block = ect_get_block(BLOCK_AP_THERMAL);
 	if (!thermal_block)
@@ -371,27 +392,29 @@ static int parse_ect_cooling_level(struct thermal_cooling_device *cdev,
 		goto skip_ect;
 
 	for (i = 0; i < function->num_of_range; ++i) {
-		unsigned long max_level = 0;
-		int level;
+		unsigned long max_level, level;
 
 		temperature = function->range_list[i].lower_bound_temperature;
 		freq = function->range_list[i].max_frequency;
 
-		instance = get_thermal_instance(tz, cdev, i);
-		if (!instance) {
-			pr_err("%s: (%s, %d)instance isn't valid\n", __func__, cooling_name, i);
+		ret = cdev->ops->get_max_state(cdev, &max_level);
+		if (ret)
 			goto skip_ect;
-		}
 
-		cdev->ops->get_max_state(cdev, &max_level);
 		level = isp_cooling_get_level(0, freq);
-
 		if (level == THERMAL_CSTATE_INVALID)
 			level = max_level;
 
-		instance->upper = level;
+		binding.trip = i;
+		binding.upper = level;
+		ret = thermal_zone_for_each_cooling_binding(tz, set_ect_cooling_level, &binding);
+		if (ret <= 0) {
+			pr_err("%s: (%s, %d) failed to set cooling limit: %d\n",
+			       __func__, cooling_name, i, ret ?: -ENODEV);
+			goto skip_ect;
+		}
 
-		pr_info("Parsed From ECT : %s: [%d] Temperature : %d, frequency : %u, level: %d\n",
+		pr_info("Parsed From ECT : %s: [%d] Temperature : %d, frequency : %u, level: %lu\n",
 			cooling_name, i, temperature, freq, level);
 	}
 skip_ect:

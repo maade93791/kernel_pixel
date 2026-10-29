@@ -29,6 +29,7 @@
 #include <thermal_core.h>
 
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 #include <trace/events/thermal_exynos.h>
 
 #if IS_ENABLED(CONFIG_PIXEL_EM)
@@ -919,29 +920,53 @@ static unsigned int find_next_max(struct cpufreq_frequency_table *table,
 	return max;
 }
 
+struct ect_cooling_level {
+	struct thermal_cooling_device *cdev;
+	int trip;
+	unsigned long upper;
+};
+
+static int set_ect_cooling_level(struct thermal_zone_device *tz,
+				 struct thermal_instance *instance, void *arg)
+{
+	struct ect_cooling_level *level = arg;
+	int ret;
+
+	if (thermal_instance_cdev(instance) != level->cdev)
+		return 0;
+
+	/* A negative trip only checks that the cooling device is bound. */
+	if (level->trip < 0)
+		return 1;
+
+	if (thermal_instance_trip_id(tz, instance) != level->trip)
+		return 0;
+
+	ret = thermal_instance_set_upper(tz, instance, level->upper);
+	return ret ?: 1;
+}
+
 static struct thermal_zone_device *parse_ect_cooling_level(
 	struct thermal_cooling_device *cdev, char *cooling_name)
 {
-	struct thermal_instance *instance;
-	struct thermal_zone_device *tz = NULL;
-	bool foundtz = false;
+	struct exynos_cpu_cooling_device *cpufreq_cdev = cdev->devdata;
+	struct ect_cooling_level binding = {
+		.cdev = cdev,
+		.trip = -1,
+	};
+	struct thermal_zone_device *tz;
 	void *thermal_block;
 	struct ect_ap_thermal_function *function;
-	int i, temperature;
+	int i, ret, temperature;
 	unsigned int freq;
 
-	mutex_lock(&cdev->lock);
-	list_for_each_entry(instance, &cdev->thermal_instances, cdev_node) {
-		tz = instance->tz;
-		if (!strncasecmp(cooling_name, tz->type, THERMAL_NAME_LENGTH)) {
-			foundtz = true;
-			break;
-		}
-	}
-	mutex_unlock(&cdev->lock);
+	tz = thermal_zone_get_zone_by_name(cooling_name);
+	if (IS_ERR(tz))
+		return NULL;
 
-	if (!foundtz)
-		goto skip_ect;
+	ret = thermal_zone_for_each_cooling_binding(tz, set_ect_cooling_level, &binding);
+	if (ret <= 0)
+		return NULL;
 
 	thermal_block = ect_get_block(BLOCK_AP_THERMAL);
 	if (!thermal_block)
@@ -952,35 +977,36 @@ static struct thermal_zone_device *parse_ect_cooling_level(
 		goto skip_ect;
 
 	for (i = 0; i < function->num_of_range; ++i) {
-		struct exynos_cpu_cooling_device *cpufreq_cdev = cdev->devdata;
-		unsigned long max_level = 0;
-		int level;
+		unsigned long max_level, level;
 
 		temperature = function->range_list[i].lower_bound_temperature;
 		freq = function->range_list[i].max_frequency;
 
-		instance = get_thermal_instance(tz, cdev, i);
-		if (!instance) {
-			pr_err("%s: (%s, %d)instance isn't valid\n", __func__, cooling_name, i);
+		ret = cdev->ops->get_max_state(cdev, &max_level);
+		if (ret)
 			goto skip_ect;
-		}
 
-		cdev->ops->get_max_state(cdev, &max_level);
 		level = get_level(cpufreq_cdev, freq);
-
 		if (level == THERMAL_CSTATE_INVALID)
 			level = max_level;
 
-		instance->upper = level;
+		binding.trip = i;
+		binding.upper = level;
+		ret = thermal_zone_for_each_cooling_binding(tz, set_ect_cooling_level, &binding);
+		if (ret <= 0) {
+			pr_err("%s: (%s, %d) failed to set cooling limit: %d\n",
+			       __func__, cooling_name, i, ret ?: -ENODEV);
+			goto skip_ect;
+		}
 
-		pr_info("Parsed From ECT : %s: [%d] Temperature : %d, frequency : %u, level: %d\n",
+		pr_info("Parsed From ECT : %s: [%d] Temperature : %d, frequency : %u, level: %lu\n",
 			cooling_name, i, temperature, freq, level);
 	}
 skip_ect:
 	return tz;
 }
 
-ssize_t
+static ssize_t
 state2power_table_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -1002,7 +1028,7 @@ state2power_table_show(struct device *dev, struct device_attribute *attr, char *
 
 static DEVICE_ATTR_RO(state2power_table);
 
-ssize_t
+static ssize_t
 user_vote_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -1014,7 +1040,7 @@ user_vote_show(struct device *dev, struct device_attribute *attr, char *buf)
 	return sprintf(buf, "%lu\n", cpufreq_cdev->sysfs_req);
 }
 
-ssize_t user_vote_store(struct device *dev, struct device_attribute *attr,
+static ssize_t user_vote_store(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -1042,7 +1068,7 @@ ssize_t user_vote_store(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_RW(user_vote);
 
-ssize_t
+static ssize_t
 user_vote_bypass_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -1054,7 +1080,7 @@ user_vote_bypass_show(struct device *dev, struct device_attribute *attr, char *b
 	return sysfs_emit(buf, "%d\n", cpufreq_cdev->sysfs_req_bypass);
 }
 
-ssize_t user_vote_bypass_store(struct device *dev, struct device_attribute *attr,
+static ssize_t user_vote_bypass_store(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -1151,7 +1177,7 @@ __exynos_cpu_cooling_register(struct device_node *np,
 		goto free_idle_time;
 	}
 
-	ret = ida_simple_get(&cpufreq_ida, 0, 0, GFP_KERNEL);
+	ret = ida_alloc(&cpufreq_ida, GFP_KERNEL);
 	if (ret < 0) {
 		cdev = ERR_PTR(ret);
 		goto free_table;
@@ -1246,7 +1272,7 @@ __exynos_cpu_cooling_register(struct device_node *np,
 remove_qos_req:
 	freq_qos_remove_request(&cpufreq_cdev->qos_req);
 remove_ida:
-	ida_simple_remove(&cpufreq_ida, cpufreq_cdev->id);
+	ida_free(&cpufreq_ida, cpufreq_cdev->id);
 free_table:
 	kfree(cpufreq_cdev->freq_table);
 free_idle_time:

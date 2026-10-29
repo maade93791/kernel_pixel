@@ -266,20 +266,15 @@ static int gs101_spmic_thermal_set_hot_trip(struct gs101_spmic_thermal_sensor *s
  * programmed as shutdown threshold.
  */
 static int gs101_spmic_thermal_set_trip_temp(struct thermal_zone_device *tz,
-					     int trip, int temp)
+					 const struct thermal_trip *trip, int temp)
 {
 	struct gs101_spmic_thermal_sensor *s = tz->devdata;
-	const struct thermal_trip *trip_points;
 	int ret = 0;
 
 	if (!s->chip->sensors_ready)
 		return -EAGAIN;
 
-	trip_points = of_thermal_get_trip_points(s->tzd);
-	if (!trip_points)
-		return -EINVAL;
-
-	if (trip_points[trip].type != THERMAL_TRIP_HOT)
+	if (trip->type != THERMAL_TRIP_HOT)
 		return ret;
 
 	/* Use THERMAL_TRIP_HOT for HW thermal shutdown */
@@ -331,6 +326,7 @@ gs101_spmic_thermal_init(struct gs101_spmic_thermal_chip *gs101_spmic_thermal)
 }
 
 static struct thermal_zone_device_ops gs101_spmic_thermal_ops = {
+	.writable_hysteresis = true,
 	.get_temp = gs101_spmic_thermal_get_temp,
 	.set_trips = gs101_spmic_thermal_set_trips,
 	.set_trip_temp = gs101_spmic_thermal_set_trip_temp,
@@ -350,26 +346,24 @@ static ssize_t channel_temp_show(struct kobject *kobj,
 
 static struct kobj_attribute channel_temp_attr = __ATTR_RO(channel_temp);
 
-static int gs101_spmic_thermal_get_hot_temp(struct thermal_zone_device *tzd)
+static int gs101_spmic_thermal_find_hot_trip(struct thermal_trip *trip, void *data)
 {
-	int ntrips;
-	const struct thermal_trip *trips;
-	int i;
+	int *temp = data;
 
-	ntrips = of_thermal_get_ntrips(tzd);
-	if (ntrips <= 0)
-		return THERMAL_TEMP_INVALID;
-
-	trips = of_thermal_get_trip_points(tzd);
-	if (!trips)
-		return THERMAL_TEMP_INVALID;
-
-	for (i = 0; i < ntrips; i++) {
-		if (of_thermal_is_trip_valid(tzd, i) && trips[i].type == THERMAL_TRIP_HOT)
-			return trips[i].temperature;
+	if (trip->temperature != THERMAL_TEMP_INVALID && trip->type == THERMAL_TRIP_HOT) {
+		*temp = trip->temperature;
+		return 1;
 	}
 
-	return THERMAL_TEMP_INVALID;
+	return 0;
+}
+
+static int gs101_spmic_thermal_get_hot_temp(struct thermal_zone_device *tzd)
+{
+	int temp = THERMAL_TEMP_INVALID;
+
+	thermal_zone_for_each_trip(tzd, gs101_spmic_thermal_find_hot_trip, &temp);
+	return temp;
 }
 
 /*
@@ -776,7 +770,7 @@ fail:
 	return ret;
 }
 
-static int gs101_spmic_thermal_remove(struct platform_device *pdev)
+static void gs101_spmic_thermal_remove(struct platform_device *pdev)
 {
 	int i;
 	u8 __maybe_unused mask = 0x01;
@@ -795,7 +789,6 @@ static int gs101_spmic_thermal_remove(struct platform_device *pdev)
 	gs101_spmic_thermal_unregister_tzd(chip);
 	gs101_spmic_set_enable(chip, false);
 
-	return 0;
 }
 
 static const struct platform_device_id gs101_spmic_thermal_id_table[] = {
