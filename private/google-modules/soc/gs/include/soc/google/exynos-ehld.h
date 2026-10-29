@@ -18,6 +18,9 @@
 #define EHLD_VAL_NORMAL			(0xC4)
 
 #if IS_ENABLED(CONFIG_EXYNOS_EHLD)
+void exynos_ehld_value_raw_update(unsigned int cpu);
+unsigned long long exynos_ehld_event_read_cpu(unsigned int cpu);
+int adv_tracer_ehld_noti_cpu_state(int cpu, int en);
 void exynos_ehld_event_raw_update(unsigned int cpu, bool update_val);
 void exynos_ehld_event_raw_dump(unsigned int cpu, bool header);
 void exynos_ehld_event_raw_update_allcpu(void);

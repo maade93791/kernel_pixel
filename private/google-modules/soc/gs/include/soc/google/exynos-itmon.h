@@ -36,6 +36,11 @@ struct itmon_notifier {
 extern void itmon_notifier_chain_register(struct notifier_block *n);
 extern void itmon_notifier_chain_unregister(struct notifier_block *n);
 extern void itmon_enable(bool enabled);
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+int itmon_en_by_name(const char *name, bool en);
+void itmon_pd_sync(const char *pd_name, bool en);
+void itmon_en(bool en);
+#endif
 #else
 #define itmon_notifier_chain_register(x)		do { } while (0)
 #define itmon_notifier_chain_unregister(x)		do { } while (0)

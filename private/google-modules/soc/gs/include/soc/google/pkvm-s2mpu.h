@@ -14,6 +14,7 @@ struct s2mpu_data {
 	struct device *dev;
 	void __iomem *base;
 	bool pkvm_registered;
+	int hyp_id;
 	bool always_on;
 	bool has_sysmmu;
 	bool has_pd;
@@ -45,7 +46,10 @@ int pkvm_s2mpu_resume(struct device *dev);
 int pkvm_s2mpu_resume_v9(struct device *dev);
 
 
-int pkvm_iommu_s2mpu_init(unsigned long token);
+int pkvm_iommu_s2mpu_prepare(void);
+void pkvm_iommu_s2mpu_release_bootstrap(void);
+int pkvm_iommu_s2mpu_init(void);
+int pkvm_iommu_s2mpu_device_id(struct device *dev);
 int pkvm_iommu_s2mpu_register(struct device *dev, phys_addr_t pa, u8 flags);
 int pkvm_iommu_sysmmu_sync_register(struct device *dev, phys_addr_t pa,
 				    struct device *parent);
