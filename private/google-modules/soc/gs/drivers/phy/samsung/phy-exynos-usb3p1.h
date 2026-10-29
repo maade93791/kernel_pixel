@@ -85,4 +85,23 @@ u8 phy_exynos_usb3p1_bc_data_contact_detect(struct exynos_usbphy_info *usbphy_in
 void phy_exynos_usb3p1_rewa_ready(struct exynos_usbphy_info *info);
 void phy_exynos_usb_v3p1_late_enable(struct exynos_usbphy_info *info);
 
+/* Additional calibration, diagnostics and BC 1.2 interfaces. */
+void phy_exynos_usb_v3p1_ssp_cal_cr_write(struct exynos_usbphy_info *info,
+				       u16 addr, u16 data);
+u16 phy_exynos_usb_v3p1_ssp_cal_cr_read(struct exynos_usbphy_info *info, u16 addr);
+void phy_exynos_usb_v3p1_cal_usb3phy_tune_fix_rxeq(struct exynos_usbphy_info *info);
+void phy_exynos_usb_v3p1_cal_usb3phy_tune_adaptive_eq(struct exynos_usbphy_info *info,
+						  u8 eq_fix);
+void phy_exynos_usb_v3p1_usb3phy_tune_chg_rxeq(struct exynos_usbphy_info *info, u8 eq_val);
+u8 phy_exynos_usb3p1_get_phyclkcnt(struct exynos_usbphy_info *info);
+u8 phy_exynos_usb3p1_get_linestate(struct exynos_usbphy_info *info);
+void phy_exynos_usb3p1_usb3phy_dp_altmode_set_ss_disable(struct exynos_usbphy_info *info,
+						    int dp_phy_port);
+void phy_exynos_usb3p1_usb3phy_dp_altmode_clear_ss_disable(struct exynos_usbphy_info *info,
+						      int dp_phy_port);
+u8 phy_exynos_usb3p1_get_fs_vplus_vminus(struct exynos_usbphy_info *info);
+void phy_exynos_usb3p1_set_fsv_out_en(struct exynos_usbphy_info *info, u32 fsv_out_en);
+enum exynos_usb_bc
+phy_exynos_usb3p1_bc_battery_charger_detection(struct exynos_usbphy_info *info);
+
 #endif /* DRIVER_USB_USBPHY_CAL_PHY_EXYNOS_USB3P1_H_ */

@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/of_platform.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/mutex.h>
@@ -1728,7 +1729,7 @@ static void exynos_usbdrd_utmi_set(struct exynos_usbdrd_phy *phy_drd,
 	exynos_usbcon_dp_pullup_en(&phy_drd->usbphy_blkcon_info, option);
 }
 
-int exynos_usbdrd_phy_link_rst(struct phy *phy)
+static int exynos_usbdrd_phy_link_rst(struct phy *phy)
 {
 	struct phy_usb_instance *inst = phy_get_drvdata(phy);
 	struct exynos_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
@@ -1738,16 +1739,24 @@ int exynos_usbdrd_phy_link_rst(struct phy *phy)
 	return 0;
 }
 
-int exynos_usbdrd_phy_set(struct phy *phy, enum phy_mode mode, int submode)
+int exynos_usbdrd_phy_set(struct phy *phy, int option, void *info)
 {
 	struct phy_usb_instance *inst = phy_get_drvdata(phy);
 	struct exynos_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
 
-	inst->phy_cfg->phy_set(phy_drd, (int)mode, (void *)&phy_drd->usbphy_info);
+	inst->phy_cfg->phy_set(phy_drd, option, info);
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(exynos_usbdrd_phy_set);
+
+static int exynos_usbdrd_phy_set_mode(struct phy *phy, enum phy_mode mode, int submode)
+{
+	struct phy_usb_instance *inst = phy_get_drvdata(phy);
+	struct exynos_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
+
+	return exynos_usbdrd_phy_set(phy, mode, &phy_drd->usbphy_info);
+}
 
 static int exynos_usbdrd_phy_power_on(struct phy *phy)
 {
@@ -1939,11 +1948,11 @@ void exynos_usbdrd_dp_use_notice(int lane)
 EXPORT_SYMBOL_GPL(exynos_usbdrd_dp_use_notice);
 
 static struct phy *exynos_usbdrd_phy_xlate(struct device *dev,
-					   struct of_phandle_args *args)
+					   const struct of_phandle_args *args)
 {
 	struct exynos_usbdrd_phy *phy_drd = dev_get_drvdata(dev);
 
-	if (WARN_ON(args->args[0] > EXYNOS_DRDPHYS_NUM))
+	if (WARN_ON(args->args[0] >= EXYNOS_DRDPHYS_NUM))
 		return ERR_PTR(-ENODEV);
 
 	return phy_drd->phys[args->args[0]].phy;
@@ -1989,7 +1998,7 @@ static struct phy_ops exynos_usbdrd_phy_ops = {
 	.power_on	= exynos_usbdrd_phy_power_on,
 	.power_off	= exynos_usbdrd_phy_power_off,
 	.reset		= exynos_usbdrd_phy_link_rst,
-	.set_mode	= exynos_usbdrd_phy_set,
+	.set_mode	= exynos_usbdrd_phy_set_mode,
 	.owner		= THIS_MODULE,
 };
 

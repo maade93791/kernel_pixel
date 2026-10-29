@@ -22,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/of_platform.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/mutex.h>
@@ -1878,7 +1879,7 @@ static void exynos_usbdrd_utmi_set(struct exynos_usbdrd_phy *phy_drd,
 	}
 }
 
-int exynos_usbdrd_phy_link_rst(struct phy *phy)
+static int exynos_usbdrd_phy_link_rst(struct phy *phy)
 {
 	struct phy_usb_instance *inst = phy_get_drvdata(phy);
 	struct exynos_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
@@ -2056,11 +2057,11 @@ void exynos_usbdrd_usbdp_tca_set(struct phy *phy, int mux, int low_power_en)
 EXPORT_SYMBOL_GPL(exynos_usbdrd_usbdp_tca_set);
 
 static struct phy *exynos_usbdrd_phy_xlate(struct device *dev,
-					   struct of_phandle_args *args)
+					   const struct of_phandle_args *args)
 {
 	struct exynos_usbdrd_phy *phy_drd = dev_get_drvdata(dev);
 
-	if (WARN_ON(args->args[0] > EXYNOS_DRDPHYS_NUM))
+	if (WARN_ON(args->args[0] >= EXYNOS_DRDPHYS_NUM))
 		return ERR_PTR(-ENODEV);
 
 	return phy_drd->phys[args->args[0]].phy;

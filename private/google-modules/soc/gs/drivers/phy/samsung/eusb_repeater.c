@@ -12,6 +12,7 @@
  */
 
 #include <linux/extcon.h>
+#include <soc/google/exynos-pd_hsi0.h>
 
 #include "eusb_repeater.h"
 
@@ -35,7 +36,7 @@ static void ensure_eusb_repeater_ready(struct eusb_repeater_data *tud)
 	mutex_unlock(&tud->mutex);
 }
 
-int eusb_repeater_i2c_write(struct eusb_repeater_data *tud, u8 reg, u8 *data, int len)
+static int eusb_repeater_i2c_write(struct eusb_repeater_data *tud, u8 reg, u8 *data, int len)
 {
 	u8 buf[I2C_WRITE_BUFFER_SIZE + 1];
 	int ret;
@@ -78,7 +79,7 @@ int eusb_repeater_i2c_write(struct eusb_repeater_data *tud, u8 reg, u8 *data, in
 	return -EIO;
 }
 
-int eusb_repeater_i2c_read(struct eusb_repeater_data *tud, u8 reg, u8 *data, int len)
+static int eusb_repeater_i2c_read(struct eusb_repeater_data *tud, u8 reg, u8 *data, int len)
 {
 	u8 buf[4];
 	int ret;
@@ -1007,8 +1008,7 @@ static void eusb_repeater_debugfs_remove(struct eusb_repeater_data *tud)
 	return;
 }
 
-static int eusb_repeater_probe(struct i2c_client *client,
-				const struct i2c_device_id *id)
+static int eusb_repeater_probe(struct i2c_client *client)
 {
 	struct device_node *of_node = client->dev.of_node;
 	struct eusb_repeater_data *tud;
@@ -1178,4 +1178,3 @@ module_exit(eusb_repeater_exit);
 MODULE_DESCRIPTION("Samsung eUSB Repeater Driver");
 MODULE_AUTHOR("Samsung Electronics");
 MODULE_LICENSE("GPL");
-
