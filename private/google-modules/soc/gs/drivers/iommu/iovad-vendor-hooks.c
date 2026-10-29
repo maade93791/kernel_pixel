@@ -7,6 +7,7 @@
 
 #include <linux/iova.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_platform.h>
 #include <trace/hooks/iommu.h>
 
