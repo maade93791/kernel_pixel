@@ -366,7 +366,7 @@ static void exynos_ufs_fit_aggr_timeout(struct exynos_ufs *ufs)
 }
 
 static void exynos_ufs_init_pmc_req(struct ufs_hba *hba,
-				    struct ufs_pa_layer_attr *pwr_max,
+				    const struct ufs_pa_layer_attr *pwr_max,
 				    struct ufs_pa_layer_attr *pwr_req)
 {
 	struct exynos_ufs *ufs = to_exynos_ufs(hba);
@@ -837,9 +837,17 @@ static int exynos_ufs_link_startup_notify(struct ufs_hba *hba,
 	return ret;
 }
 
+static int exynos_ufs_negotiate_pwr_mode(struct ufs_hba *hba,
+					const struct ufs_pa_layer_attr *pwr_max,
+					struct ufs_pa_layer_attr *pwr_req)
+{
+	/* Set PMC parameters to be requested. */
+	exynos_ufs_init_pmc_req(hba, pwr_max, pwr_req);
+	return 0;
+}
+
 static int exynos_ufs_pwr_change_notify(struct ufs_hba *hba,
 					enum ufs_notify_change_status notify,
-					struct ufs_pa_layer_attr *pwr_max,
 					struct ufs_pa_layer_attr *pwr_req)
 {
 	struct exynos_ufs *ufs = to_exynos_ufs(hba);
@@ -857,9 +865,6 @@ static int exynos_ufs_pwr_change_notify(struct ufs_hba *hba,
 
 		if (!IS_C_STATE_ON(ufs) || ufs->h_state != H_REQ_BUSY)
 			PRINT_STATES(ufs);
-
-		/* Set PMC parameters to be requested */
-		exynos_ufs_init_pmc_req(hba, pwr_max, pwr_req);
 
 		/* cal */
 		ufs->cal_param.pmd = act_pmd;
@@ -1118,6 +1123,7 @@ static struct ufs_hba_variant_ops exynos_ufs_ops = {
 	.setup_clocks = exynos_ufs_setup_clocks,
 	.hce_enable_notify = exynos_ufs_hce_enable_notify,
 	.link_startup_notify = exynos_ufs_link_startup_notify,
+	.negotiate_pwr_mode = exynos_ufs_negotiate_pwr_mode,
 	.pwr_change_notify = exynos_ufs_pwr_change_notify,
 	.setup_xfer_req = exynos_ufs_set_nexus_t_xfer_req,
 	.setup_task_mgmt = exynos_ufs_set_nexus_t_task_mgmt,
@@ -1750,7 +1756,7 @@ free_exynos_ufs:
 	return ret;
 }
 
-static int exynos_ufs_remove(struct platform_device *pdev)
+static void exynos_ufs_remove(struct platform_device *pdev)
 {
 	struct exynos_ufs *ufs = dev_get_platdata(&pdev->dev);
 	struct ufs_hba *hba =  platform_get_drvdata(pdev);
@@ -1766,13 +1772,6 @@ static int exynos_ufs_remove(struct platform_device *pdev)
 	exynos_pm_qos_remove_request(&ufs->pm_qos_int);
 
 	exynos_ufs_ctrl_phy_pwr(ufs, false);
-
-	return 0;
-}
-
-static void exynos_ufs_shutdown(struct platform_device *pdev)
-{
-	ufshcd_shutdown((struct ufs_hba *)platform_get_drvdata(pdev));
 }
 
 static const struct dev_pm_ops exynos_ufs_dev_pm_ops = {
@@ -1795,7 +1794,6 @@ static struct platform_driver exynos_ufs_driver = {
 	},
 	.probe = exynos_ufs_probe,
 	.remove = exynos_ufs_remove,
-	.shutdown = exynos_ufs_shutdown,
 };
 
 module_platform_driver(exynos_ufs_driver);

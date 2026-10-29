@@ -10,7 +10,7 @@
 #ifndef _UFS_PIXEL_H_
 #define _UFS_PIXEL_H_
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <ufs/ufshcd.h>
 #include <scsi/scsi_cmnd.h>
 
@@ -227,6 +227,7 @@ int pixel_init(struct ufs_hba *hba, struct device *pdev,
 	       const struct pixel_crypto_ops *crypto_ops);
 extern void pixel_exit(struct ufs_hba *hba);
 extern void pixel_ufs_record_hibern8(struct ufs_hba *hba, bool is_enter_h8);
+void pixel_ufs_update_req_stats(struct ufs_hba *hba, struct ufshcd_lrb *lrbp);
 extern void pixel_print_cmd_log(struct ufs_hba *hba);
 
 enum pixel_event_type {

@@ -8,6 +8,7 @@
  */
 
 #include <core/ufshcd-priv.h>
+#include <core/ufs_trace_types.h>
 #include <linux/workqueue.h>
 #include <misc/sbbm.h>
 #include "ufs-pixel.h"
@@ -723,17 +724,17 @@ static void pixel_ufs_send_command(void *data, struct ufs_hba *hba,
 
 static inline int ufshcd_get_tr_ocs(struct ufshcd_lrb *lrbp)
 {
-	return le32_to_cpu(lrbp->utr_descriptor_ptr->header.dword_2) & MASK_OCS;
+	return lrbp->utr_descriptor_ptr->header.ocs & MASK_OCS;
 }
 
 static inline int ufshcd_get_req_rsp(struct utp_upiu_rsp *ucd_rsp_ptr)
 {
-	return be32_to_cpu(ucd_rsp_ptr->header.dword_0) >> 24;
+	return ucd_rsp_ptr->header.transaction_code;
 }
 
 static inline int ufshcd_get_rsp_upiu_result(struct utp_upiu_rsp *ucd_rsp_ptr)
 {
-	return be32_to_cpu(ucd_rsp_ptr->header.dword_1) & MASK_RSP_UPIU_RESULT;
+	return (ucd_rsp_ptr->header.response << 8) | ucd_rsp_ptr->header.status;
 }
 
 static void pixel_ufs_compl_command(void *data, struct ufs_hba *hba,
@@ -938,7 +939,7 @@ static ssize_t manual_gc_store(struct device *dev,
 	}
 
 	if (!ufs->manual_gc.hagc_support) {
-		err = ufshcd_bkops_ctrl(hba, (value == MANUAL_GC_ON) ?
+		err = ufshcd_bkops_ctrl_level(hba, (value == MANUAL_GC_ON) ?
 					BKOPS_STATUS_NON_CRITICAL:
 					BKOPS_STATUS_CRITICAL);
 		if (!hba->auto_bkops_enabled)
@@ -1007,8 +1008,8 @@ void pixel_init_manual_gc(struct ufs_hba *hba)
 	mgc->hagc_support = true;
 	mgc->delay_ms = UFSHCD_MANUAL_GC_HOLD_HIBERN8;
 
-	hrtimer_init(&mgc->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	mgc->hrtimer.function = pixel_mgc_hrtimer_handler;
+	hrtimer_setup(&mgc->hrtimer, pixel_mgc_hrtimer_handler,
+		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 	INIT_WORK(&mgc->hibern8_work, pixel_mgc_hibern8_work);
 	snprintf(wq_name, ARRAY_SIZE(wq_name), "ufs_mgc_hibern8_work_%d",
@@ -1782,7 +1783,7 @@ static ssize_t _name##_show(struct device *dev,			\
 	struct ufs_hba *hba = dev_get_drvdata(dev);			\
 	u32 value;						\
 	pm_runtime_get_sync(hba->dev);			\
-	ufshcd_hold(hba, false);			\
+	ufshcd_hold(hba);			\
 	value = ufshcd_readl(hba, REG##_uname);			\
 	ufshcd_release(hba);			\
 	pm_runtime_put(hba->dev);			\
@@ -1792,8 +1793,8 @@ static DEVICE_ATTR_RO(_name)
 
 PIXEL_HC_REG_ATTR(cap, _CONTROLLER_CAPABILITIES);
 PIXEL_HC_REG_ATTR(ver, _UFS_VERSION);
-PIXEL_HC_REG_ATTR(hcpid, _CONTROLLER_DEV_ID);
-PIXEL_HC_REG_ATTR(hcmid, _CONTROLLER_PROD_ID);
+PIXEL_HC_REG_ATTR(hcpid, _CONTROLLER_PID);
+PIXEL_HC_REG_ATTR(hcmid, _CONTROLLER_MID);
 PIXEL_HC_REG_ATTR(ahit, _AUTO_HIBERNATE_IDLE_TIMER);
 PIXEL_HC_REG_ATTR(is, _INTERRUPT_STATUS);
 PIXEL_HC_REG_ATTR(ie, _INTERRUPT_ENABLE);
