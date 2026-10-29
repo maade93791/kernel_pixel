@@ -9,6 +9,7 @@
 #include "linux/cpumask.h"
 #include "linux/delay.h"
 #include "linux/spinlock.h"
+#include <linux/cpuhotplug.h>
 #include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/sched.h>
@@ -16,7 +17,7 @@
 #include <trace/hooks/mm.h>
 #include <trace/hooks/vmscan.h>
 #include <uapi/linux/sched/types.h>
-#include <heaps/deferred-free-helper.h>
+#include "../../../../../dma-buf/heaps/deferred-free-helper.h"
 
 #include "../../include/pixel_mm_hint.h"
 #include "../../include/pixel_mm.h"
@@ -236,8 +237,8 @@ static ssize_t kcompactd_cpu_affinity_store(struct kobject *kobj,
 	return ret ? ret : len;
 }
 
-/* kcompactd_cpu_online() resets cpumask, so we need to restore it. */
-static void vh_kcompactd_cpu_online(void *data, int cpu) {
+/* Restore the requested mask after the core kthread hotplug callback. */
+static int vh_kcompactd_cpu_online(unsigned int cpu) {
 	cpumask_t affinity;
 
 	if (tsk_kcompactd) {
@@ -246,6 +247,7 @@ static void vh_kcompactd_cpu_online(void *data, int cpu) {
 			set_cpus_allowed_ptr(tsk_kcompactd, &affinity);
 		}
 	}
+	return 0;
 }
 
 VENDOR_MM_RW(kcompactd_cpu_affinity);
@@ -341,19 +343,24 @@ static int init_get_kswapd_kcompactd_tasks(void)
 struct kobject *vendor_mm_kobj;
 EXPORT_SYMBOL_GPL(vendor_mm_kobj);
 
-extern int pixel_mm_cma_sysfs(struct kobject *parent);
-
 static int vh_mm_init(void)
 {
-	int ret;
+	int ret, hp_state;
 
 	ret = init_get_kswapd_kcompactd_tasks();
 	if (ret)
-		goto out_err;
+		return ret;
+
+	hp_state = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "pixel/mm:online",
+					   vh_kcompactd_cpu_online, NULL);
+	if (hp_state < 0)
+		return hp_state;
 
 	vendor_mm_kobj = kobject_create_and_add("vendor_mm", kernel_kobj);
-	if (!vendor_mm_kobj)
-		return -ENOMEM;
+	if (!vendor_mm_kobj) {
+		ret = -ENOMEM;
+		goto out_hotplug;
+	}
 
 	ret = sysfs_create_groups(vendor_mm_kobj, vendor_mm_groups);
 	if (ret)
@@ -364,11 +371,6 @@ static int vh_mm_init(void)
 		goto out_err;
 
 	ret = pixel_mm_filemap_sysfs(vendor_mm_kobj);
-	if (ret)
-		goto out_err;
-
-	ret = register_trace_android_vh_mm_kcompactd_cpu_online(
-		vh_kcompactd_cpu_online, NULL);
 	if (ret)
 		goto out_err;
 
@@ -393,10 +395,12 @@ static int vh_mm_init(void)
 	if (ret)
 		goto out_err;
 
-	return ret;
+	return 0;
 
 out_err:
 	kobject_put(vendor_mm_kobj);
+out_hotplug:
+	cpuhp_remove_state_nocalls(hp_state);
 	return ret;
 }
 module_init(vh_mm_init);

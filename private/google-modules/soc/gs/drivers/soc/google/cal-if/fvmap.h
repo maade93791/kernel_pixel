@@ -1,6 +1,9 @@
 #ifndef __FVMAP_H__
 #define __FVMAP_H__
 
+int fvmap_set_raw_voltage_table(unsigned int id, int uV);
+int fvmap_get_raw_voltage_table(unsigned int id);
+
 /* FV(Frequency Voltage MAP) */
 struct fvmap_header {
 	u8 dvfs_type;

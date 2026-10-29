@@ -635,18 +635,17 @@ static int power_stats_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ps_dev);
 
-	ret = devm_device_add_groups(&pdev->dev, power_stats_groups);
+	ret = devm_device_add_group(&pdev->dev, power_stats_groups[0]);
 	if (ret)
 		dev_err(&pdev->dev, "Failed to add device groups\n");
 
 	return 0;
 }
 
-static int power_stats_remove(struct platform_device *pdev)
+static void power_stats_remove(struct platform_device *pdev)
 {
 	platform_set_drvdata(pdev, NULL);
 
-	return 0;
 }
 
 static const struct of_device_id power_stats_match[] = {

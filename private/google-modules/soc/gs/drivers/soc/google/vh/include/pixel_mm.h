@@ -3,6 +3,7 @@
 #ifndef PIXEL_MM_H
 #define PIXEL_MM_H
 
+int pixel_mm_cma_sysfs(struct kobject *parent);
 int pixel_mm_filemap_sysfs(struct kobject *parent);
 
 void vh_do_async_mmap_readahead(void *data, struct vm_fault *vmf,

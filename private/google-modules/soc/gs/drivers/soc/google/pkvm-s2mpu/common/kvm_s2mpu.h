@@ -402,9 +402,15 @@ static_assert(SMPT_GRAN <= PAGE_SIZE);
  * Iterate over S2MPU gigabyte regions. Skip those that cannot be modified
  * (the MMIO registers are read only, with reset value MPT_PROT_NONE).
  */
+static inline unsigned int s2mpu_rw_gb(unsigned int gb)
+{
+	return gb >= RO_GIGABYTES_FIRST && gb <= RO_GIGABYTES_LAST ?
+		RO_GIGABYTES_LAST + 1 : gb;
+}
+
 #define for_each_gb_in_range(i, first, last) \
-	for ((i) = (first); (i) <= (last) && (i) < NR_GIGABYTES; \
-	     (i) = (((i) + 1 == RO_GIGABYTES_FIRST) ? RO_GIGABYTES_LAST : (i)) + 1)
+	for ((i) = s2mpu_rw_gb(first); (i) <= (last) && (i) < NR_GIGABYTES; \
+	     (i) = s2mpu_rw_gb((i) + 1))
 
 #define for_each_gb(i)			for_each_gb_in_range(i, 0, NR_GIGABYTES - 1)
 #define for_each_vid(i)			for ((i) = 0; (i) < NR_VIDS; (i)++)
@@ -438,6 +444,27 @@ struct fmpt {
 
 struct mpt {
 	struct fmpt fmpt[NR_GIGABYTES];
+};
+
+/* The ACK host-HVC power-domain table bounds the number of devices. */
+#define S2MPU_MAX_DEVICES			40
+#define S2MPU_MAX_SYNCS				128
+
+struct s2mpu_boot_device {
+	phys_addr_t pa;
+	u16 sync_first;
+	u16 nr_syncs;
+	u8 flags;
+	bool off_at_boot;
+};
+
+/* Filled before EL2 module loading, then owned exclusively by the hypervisor. */
+struct s2mpu_boot_data {
+	phys_addr_t smpt_pa[NR_GIGABYTES];
+	struct s2mpu_boot_device devices[S2MPU_MAX_DEVICES];
+	phys_addr_t sync_pa[S2MPU_MAX_SYNCS];
+	u16 nr_devices;
+	u16 nr_syncs;
 };
 
 /* Compile time configuration for S2MPU. */

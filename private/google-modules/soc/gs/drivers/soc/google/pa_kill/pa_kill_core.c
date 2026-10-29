@@ -11,6 +11,7 @@
 #include <uapi/linux/sched/types.h>
 #include <trace/hooks/systrace.h>
 
+#include "pa_kill_core.h"
 #include "pa_kill_sysfs.h"
 #include "../vh/include/pixel_mm_hint.h"
 
@@ -290,7 +291,7 @@ cleanup:
 	return err;
 }
 
-int __init pa_kill_init(void)
+static int __init pa_kill_init(void)
 {
 	int err;
 

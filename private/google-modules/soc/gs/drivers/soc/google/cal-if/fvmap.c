@@ -77,7 +77,7 @@ module_param(margin_mfc, int, 0);
 module_param(margin_disp, int, 0);
 module_param(margin_bw, int, 0);
 
-void margin_table_init(void)
+static void margin_table_init(void)
 {
 	margin_table[MARGIN_MIF] = &margin_mif;
 	margin_table[MARGIN_INT] = &margin_int;

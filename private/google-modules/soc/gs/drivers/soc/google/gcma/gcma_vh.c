@@ -4,23 +4,44 @@
  *
  */
 
+#include <linux/gcma.h>
 #include <trace/hooks/mm.h>
 
-static atomic64_t total_gcma_pages = ATOMIC64_INIT(0);
+#include "gcma_debug.h"
+#include "gcma_vh.h"
 
 static void vh_gcma_si_meminfo_fixup(void *data, unsigned long *totalram,
 				unsigned long *freeram)
 {
-	*totalram += (u64)atomic64_read(&total_gcma_pages);
+	*totalram += gcma_stat_get(TOTAL_PAGE);
 }
 
-void inc_gcma_total_pages(unsigned long page_count)
+static void vh_gcma_allow_nonworkingset(void *data, bool *allow)
 {
-	atomic64_add(page_count, &total_gcma_pages);
+	if (!workingset_filter_enabled())
+		*allow = true;
 }
 
 int __init gcma_vh_init(void)
 {
+	int ret;
 
-	return register_trace_android_vh_si_meminfo_adjust(vh_gcma_si_meminfo_fixup, NULL);
+	ret = register_trace_android_vh_si_meminfo_adjust(vh_gcma_si_meminfo_fixup, NULL);
+	if (ret)
+		return ret;
+
+	ret = register_trace_android_vh_gcma_cc_allow_nonworkingset(
+			vh_gcma_allow_nonworkingset, NULL);
+	if (ret) {
+		unregister_trace_android_vh_si_meminfo_adjust(vh_gcma_si_meminfo_fixup, NULL);
+		tracepoint_synchronize_unregister();
+	}
+	return ret;
+}
+
+void gcma_vh_exit(void)
+{
+	unregister_trace_android_vh_gcma_cc_allow_nonworkingset(vh_gcma_allow_nonworkingset, NULL);
+	unregister_trace_android_vh_si_meminfo_adjust(vh_gcma_si_meminfo_fixup, NULL);
+	tracepoint_synchronize_unregister();
 }

@@ -597,7 +597,7 @@ static int ra_enable_fixed_rate(struct cmucal_clk *clk, unsigned int params)
 	return 0;
 }
 
-int ra_enable_clkout(struct cmucal_clk *clk, bool enable)
+static int ra_enable_clkout(struct cmucal_clk *clk, bool enable)
 {
 	struct cmucal_clkout *clkout = to_clkout(clk);
 

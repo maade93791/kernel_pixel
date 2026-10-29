@@ -1,6 +1,8 @@
 #ifndef __ASV_GS101_H__
 #define __ASV_GS101_H__
 
+#include "../asv.h"
+
 int asv_get_grp(unsigned int id)
 {
 	int grp = -1;

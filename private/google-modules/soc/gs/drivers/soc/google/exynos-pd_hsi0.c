@@ -5,6 +5,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
 #include <soc/google/exynos-pd_hsi0.h>
@@ -206,13 +207,11 @@ static int exynos_pd_hsi0_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int exynos_pd_hsi0_remove(struct platform_device *pdev)
+static void exynos_pd_hsi0_remove(struct platform_device *pdev)
 {
 	struct exynos_pd_hsi0_data *hsi0_data = platform_get_drvdata(pdev);
 
 	kfree(hsi0_data);
-
-	return 0;
 }
 
 static const struct of_device_id hsi0_of_match[] = {

@@ -116,6 +116,7 @@ static cpumask_t pixel_sched_governor_mask = CPU_MASK_NONE;
 static DEFINE_PER_CPU(struct sugov_cpu, sugov_cpu);
 DEFINE_PER_CPU(struct uclamp_stats, uclamp_stats);
 static struct kthread_worker pmu_worker;
+static struct task_struct *pmu_poll_thread;
 static struct kthread_work pmu_work;
 static struct irq_work pmu_irq_work;
 static DEFINE_SPINLOCK(pmu_poll_enable_lock);
@@ -249,7 +250,7 @@ static inline void sugov_update_response_time_mult(struct sugov_policy *sg_polic
 	mult = sg_policy->freq_response_time_ms * SCHED_CAPACITY_SCALE;
 	mult /=	sg_policy->tunables->response_time_ms;
 
-	if (SCHED_WARN_ON(!mult))
+	if (VENDOR_SCHED_WARN_ON(!mult))
 		mult = SCHED_CAPACITY_SCALE;
 
 	for_each_cpu(cpu, sg_policy->policy->cpus)
@@ -278,7 +279,7 @@ apply_dvfs_headroom(unsigned long util, int cpu, bool tapered)
 	}
 
 	if (tapered && static_branch_unlikely(&tapered_dvfs_headroom_enable)) {
-		unsigned long capacity = capacity_orig_of(cpu);
+		unsigned long capacity = arch_scale_cpu_capacity(cpu);
 		unsigned long headroom;
 
 		if (util >= capacity)
@@ -396,8 +397,8 @@ void update_uclamp_stats(int cpu, u64 time)
 	struct uclamp_stats *stats = &per_cpu(uclamp_stats, cpu);
 	s64 delta_ns = time - stats->last_update_time;
 	struct rq *rq = cpu_rq(cpu);
-	unsigned long cpu_util = min(capacity_orig_of(cpu), cpu_util_cfs(rq) + cpu_util_rt(rq));
-	unsigned long cpu_util_max_clamped = min(capacity_orig_of(cpu), cpu_util_cfs_group_mod(cpu) +
+	unsigned long cpu_util = min(arch_scale_cpu_capacity(cpu), cpu_util_cfs(cpu) + cpu_util_rt(rq));
+	unsigned long cpu_util_max_clamped = min(arch_scale_cpu_capacity(cpu), cpu_util_cfs_group_mod(cpu) +
 						 cpu_util_rt(rq));
 	unsigned int uclamp_min = READ_ONCE(rq->uclamp[UCLAMP_MIN].value);
 	unsigned int uclamp_max = READ_ONCE(rq->uclamp[UCLAMP_MAX].value);
@@ -656,6 +657,31 @@ static void sugov_deferred_update(struct sugov_policy *sg_policy)
 	}
 }
 
+/* Keep Pixel response-time/headroom and IO-wait boosts within effective clamps. */
+static unsigned long sugov_clamp_util(struct rq *rq, unsigned long util,
+				     struct task_struct *p)
+{
+	unsigned long min_util = 0, max_util = 0;
+
+	if (!uclamp_is_used())
+		return util;
+
+	if (p) {
+		min_util = uclamp_eff_value(p, UCLAMP_MIN);
+		max_util = uclamp_eff_value(p, UCLAMP_MAX);
+
+		/* An arriving task replaces the idle rq's retained maximum. */
+		if (uclamp_rq_is_idle(rq))
+			goto apply;
+	}
+
+	min_util = max(min_util, uclamp_rq_get(rq, UCLAMP_MIN));
+	max_util = max(max_util, uclamp_rq_get(rq, UCLAMP_MAX));
+apply:
+	/* The minimum wins if max aggregation inverts the clamp interval. */
+	return max(min_util, min(util, max_util));
+}
+
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
 
@@ -724,14 +750,14 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
  */
 __always_inline
 unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
-				 unsigned long max, enum cpu_util_type type,
+				 unsigned long max, enum pixel_cpu_util_type type,
 				 struct task_struct *p)
 {
 	unsigned long dl_util, util, irq;
 	struct rq *rq = cpu_rq(cpu);
 
 	if (!uclamp_is_used() &&
-	    type == FREQUENCY_UTIL && rt_rq_is_runnable(&rq->rt)) {
+	    type == PIXEL_FREQUENCY_UTIL && rt_rq_is_runnable(&rq->rt)) {
 		return max;
 	}
 
@@ -757,14 +783,14 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 * frequency will be gracefully reduced with the utilization decay.
 	 */
 	util = util_cfs + cpu_util_rt(rq);
-	if (type == FREQUENCY_UTIL) {
+	if (type == PIXEL_FREQUENCY_UTIL) {
 		/*
 		 * Speed up/slow down response timee first then apply DVFS
 		 * headroom. We only want to do that for cfs+rt util.
 		 */
 		util = sugov_apply_response_time(util, cpu);
 		util = apply_dvfs_headroom(util, cpu, true);
-		util = uclamp_rq_util_with(rq, util, p);
+		util = sugov_clamp_util(rq, util, p);
 		trace_schedutil_cpu_util_clamp(cpu, util_cfs, cpu_util_rt(rq), util, max);
 	}
 
@@ -786,7 +812,7 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 * OTOH, for energy computation we need the estimated running time, so
 	 * include util_dl and ignore dl_bw.
 	 */
-	if (type == ENERGY_UTIL)
+	if (type == PIXEL_ENERGY_UTIL)
 		util += dl_util;
 
 	/*
@@ -803,7 +829,7 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 * be multiplied by the headroom.
 	 */
 	util = scale_irq_capacity(util, irq, max);
-	util += type == FREQUENCY_UTIL ? apply_dvfs_headroom(irq, cpu, false) : irq;
+	util += type == PIXEL_FREQUENCY_UTIL ? apply_dvfs_headroom(irq, cpu, false) : irq;
 
 	/*
 	 * Bandwidth required by DEADLINE must always be granted while, for
@@ -815,7 +841,7 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 * bw_dl as requested freq. However, cpufreq is not yet ready for such
 	 * an interface. So, we only do the latter for now.
 	 */
-	if (type == FREQUENCY_UTIL)
+	if (type == PIXEL_FREQUENCY_UTIL)
 		util += apply_dvfs_headroom(cpu_bw_dl(rq), cpu, false);
 
 	return min(max, util);
@@ -831,7 +857,7 @@ sugov_get_util(struct sugov_cpu *sg_cpu)
 	sg_cpu->bw_dl = cpu_bw_dl(rq);
 
 	sg_cpu->util = schedutil_cpu_util_pixel_mod(sg_cpu->cpu,
-			cpu_util_cfs_group_mod(sg_cpu->cpu), max, FREQUENCY_UTIL, NULL);
+			cpu_util_cfs_group_mod(sg_cpu->cpu), max, PIXEL_FREQUENCY_UTIL, NULL);
 }
 
 /**
@@ -963,7 +989,7 @@ apply_boost:
 	 */
 	boost = (sg_cpu->iowait_boost * sg_cpu->max) >> SCHED_CAPACITY_SHIFT;
 	boost = max(boost, sg_cpu->util);
-	sg_cpu->util = uclamp_rq_util_with(cpu_rq(sg_cpu->cpu), boost, NULL);
+	sg_cpu->util = sugov_clamp_util(cpu_rq(sg_cpu->cpu), boost, NULL);
 }
 
 #if IS_ENABLED(CONFIG_NO_HZ_COMMON)
@@ -1228,7 +1254,7 @@ static void sugov_irq_work(struct irq_work *irq_work)
 
 int pmu_poll_enable(void)
 {
-	// Check pmu_poll_init finish successfully
+	// Check PMU worker startup finished successfully
 	if (!pmu_work.func || !pmu_worker.task)
 		return -EBUSY;
 
@@ -1811,7 +1837,7 @@ static void pmu_poll_irq_work(struct irq_work *irq_work)
 	kthread_queue_work(&pmu_worker, &pmu_work);
 }
 
-int pmu_poll_init(void)
+int pmu_poll_prepare(void)
 {
 	int ret = 0;
 	struct task_struct *thread;
@@ -1836,9 +1862,21 @@ int pmu_poll_init(void)
 		return ret;
 	}
 
-	wake_up_process(thread);
+	pmu_poll_thread = thread;
 
 	return ret;
+}
+
+void pmu_poll_start(void)
+{
+	wake_up_process(pmu_poll_thread);
+}
+
+void pmu_poll_abort_prepare(void)
+{
+	/* No published producer/control can queue work before permanent admission. */
+	kthread_stop(pmu_poll_thread);
+	pmu_poll_thread = NULL;
 }
 
 static int sugov_kthread_create(struct sugov_policy *sg_policy)

@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-config GCMA
-        tristate "GCMA(Guaranteed Contiguous Memory Allocator"
-        depends on CLEANCACHE
+config GCMA_VENDOR
+	tristate "Pixel GCMA accounting and diagnostics"
+	depends on GCMA && GCMA_SYSFS && ANDROID_VENDOR_HOOKS
+	help
+	  Preserve Pixel memory accounting, allocation latency statistics and
+	  diagnostic interfaces while using the Android common GCMA allocator.

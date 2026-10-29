@@ -14,9 +14,11 @@
 #include <linux/of.h>
 #include <linux/io.h>
 #include <linux/cpuidle.h>
+#include <linux/workqueue.h>
 #include <asm/barrier.h>
 #include <asm/sysreg.h>
 #include <soc/google/debug-snapshot.h>
+#include <soc/google/exynos-coresight.h>
 #include <soc/google/sjtag-driver.h>
 
 #include "core_regs.h"
@@ -374,7 +376,7 @@ static void bdu_etr_disable(void)
 static void exynos_etm_smp_enable(void *ununsed);
 void exynos_etm_trace_start(void);
 
-static void smp_disable_idle_states(void *ptr)
+static long disable_cpu_idle_states(void *ptr)
 {
 	struct cpuidle_driver *drv;
 	bool disable = *(bool *)ptr;
@@ -384,25 +386,29 @@ static void smp_disable_idle_states(void *ptr)
 
 	if (!drv) {
 		dev_warn(ee_info->dev, "No idle driver registered.\n");
-		return;
+		return 0;
 	}
 
 	for (i = 1; i < drv->state_count; i++) {
 		cpuidle_driver_state_disabled(drv, i, disable);
 	}
+
+	return 0;
 }
 
 /*
  * TODO: b/286355474 workaround for ETR_MIU dump to disable C2 idle
- * SMP call each CPU to disable idle states excpet for wfi.
+ * Run on each online CPU in process context because changing an idle state
+ * takes cpuidle_lock. Keep WFI available.
  */
 static void exynos_disable_idle_states(bool disable)
 {
 	int cpu;
 
-	for_each_possible_cpu(cpu) {
-		smp_call_function_single(cpu, smp_disable_idle_states, &disable, 1);
-	}
+	cpus_read_lock();
+	for_each_online_cpu(cpu)
+		work_on_cpu(cpu, disable_cpu_idle_states, &disable);
+	cpus_read_unlock();
 }
 
 int gs_coresight_etm_external_etr_on(u64 buf_addr, u32 buf_size)
@@ -953,7 +959,7 @@ static DEVICE_ATTR_RO(port_status);
 #ifdef CONFIG_EXYNOS_CORESIGHT_ETR
 static ssize_t etr_dump_read(struct file *filp,
 			     struct kobject *kobj,
-			     struct bin_attribute *attr,
+			     const struct bin_attribute *attr,
 			     char *buffer,
 			     loff_t pos,
 			     size_t size)
@@ -971,7 +977,7 @@ static ssize_t etr_dump_read(struct file *filp,
 
 static BIN_ATTR_RO(etr_dump, 0);
 
-static struct bin_attribute *exynos_etr_sysfs_attrs[] = {
+static const struct bin_attribute *const exynos_etr_sysfs_attrs[] = {
 	&bin_attr_etr_dump,
 	NULL,
 };

@@ -1,6 +1,9 @@
 #ifndef __CMUCAL_RA_H__
 #define __CMUCAL_RA_H__
 
+struct cmucal_clk;
+int ra_enable_qch(struct cmucal_clk *clk, unsigned int en);
+
 enum trans_opt {
 	TRANS_IGNORE,
 	TRANS_HIGH,

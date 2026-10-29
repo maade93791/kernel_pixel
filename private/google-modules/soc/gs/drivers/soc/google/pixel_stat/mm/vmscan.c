@@ -15,6 +15,7 @@
 #include <linux/jiffies.h>
 #include <linux/pagemap.h>
 #include <linux/ktime.h>
+#include "vmscan.h"
 
 #include "../../vh/include/sched.h"
 
@@ -129,11 +130,11 @@ void rvh_madvise_pageout_end(void *data, void *private, struct list_head *folio_
 		return;
 
 	while (!list_empty(&vendor_private->ret_list)) {
-		struct page *page;
+		struct folio *folio;
 
-		page = lru_to_page(&vendor_private->ret_list);
-		wait_on_page_writeback(page);
-		list_move(&page->lru, folio_list);
+		folio = lru_to_folio(&vendor_private->ret_list);
+		folio_wait_writeback(folio);
+		list_move(&folio->lru, folio_list);
 	}
 
 	kfree(vendor_private);

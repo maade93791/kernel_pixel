@@ -11,6 +11,16 @@
 
 #include <linux/tracepoint.h>
 
+struct task_struct;
+void note_irq_disable(void *unused, unsigned long ip, unsigned long parent_ip);
+void test_irq_disable_long(void *unused, unsigned long ip, unsigned long parent_ip);
+void note_preempt_disable(void *unused, unsigned long ip, unsigned long parent_ip);
+void test_preempt_disable_long(void *unused, unsigned long ip, unsigned long parent_ip);
+void note_context_switch(void *unused, bool preempt, struct task_struct *prev,
+			struct task_struct *next, unsigned int prev_state);
+int preemptirq_long_init(void);
+void preemptirq_long_unregister(void);
+
 DECLARE_EVENT_CLASS(preemptirq_long_template,
 
 	TP_PROTO(u64 delta),

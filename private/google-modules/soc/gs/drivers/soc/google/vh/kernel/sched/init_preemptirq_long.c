@@ -13,13 +13,7 @@
 #include <trace/hooks/preemptirq.h>
 #include <trace/events/sched.h>
 
-extern void note_irq_disable(void *u1, unsigned long u2, unsigned long u3);
-extern void test_irq_disable_long(void *u1, unsigned long u2, unsigned long u3);
-extern void test_preempt_disable_long(void *u1, unsigned long u2, unsigned long u3);
-extern void note_preempt_disable(void *u1, unsigned long u2, unsigned long u3);
-extern void note_context_switch(void *u1, bool u2, struct task_struct *u3,
-				struct task_struct *next, unsigned int prev_state);
-extern int preemptirq_long_init(void);
+#include "preemptirq_long.h"
 
 static int vh_long_preemptirq_init(void)
 {
@@ -30,24 +24,31 @@ static int vh_long_preemptirq_init(void)
 		return ret;
 
 	ret = register_trace_android_rvh_irqs_disable(note_irq_disable, NULL);
-	if (ret)
+	if (ret) {
+		preemptirq_long_unregister();
 		return ret;
+	}
+
+	/* Restricted hooks cannot be unregistered: module lifetime is permanent. */
 
 	ret = register_trace_android_rvh_irqs_enable(test_irq_disable_long, NULL);
 	if (ret)
-		return ret;
+		panic("vh_preemptirq_long: android_rvh_irqs_enable failed after publication: %d\n",
+		      ret);
 
 	ret = register_trace_android_rvh_preempt_disable(note_preempt_disable, NULL);
 	if (ret)
-		return ret;
+		panic("vh_preemptirq_long: android_rvh_preempt_disable failed after publication: %d\n",
+		      ret);
 
 	ret = register_trace_android_rvh_preempt_enable(test_preempt_disable_long, NULL);
 	if (ret)
-		return ret;
+		panic("vh_preemptirq_long: android_rvh_preempt_enable failed after publication: %d\n",
+		      ret);
 
 	ret = register_trace_sched_switch(note_context_switch, NULL);
 	if (ret)
-		return ret;
+		panic("vh_preemptirq_long: sched_switch failed after publication: %d\n", ret);
 
 	return ret;
 }

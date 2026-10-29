@@ -26,6 +26,7 @@
 #include <linux/suspend.h>
 #include <linux/sched/task.h>
 #include <trace/hooks/cpuidle.h>
+#include <trace/hooks/traps.h>
 #include <trace/events/power.h>
 
 #include <asm/debug-monitors.h>
@@ -156,7 +157,7 @@ static void pm_dev_start(void *data, struct device *dev, const char *pm_ops, int
 	priv->dev = dev;
 	priv->parent = dev->parent;
 	priv->event = event;
-	strlcpy(priv->pm_ops, pm_ops, sizeof(priv->pm_ops));
+	strscpy(priv->pm_ops, pm_ops, sizeof(priv->pm_ops));
 	interval_tree_insert(&priv->node, &pm_dev_rbroot);
 exit:
 	spin_unlock_irqrestore(&pm_trace_lock, flags);
@@ -372,10 +373,14 @@ static int hardlockup_debug_bug_handler(struct pt_regs *regs, unsigned long esr)
 	return DBG_HOOK_ERROR;
 }
 
-static struct break_hook hardlockup_debug_break_hook = {
-	.fn = hardlockup_debug_bug_handler,
-	.imm = BUG_BRK_IMM_HARDLOCKUP,
-};
+static void hardlockup_debug_brk(void *unused, struct pt_regs *regs,
+				unsigned long esr, bool *handled)
+{
+	if (esr_brk_comment(esr) != BUG_BRK_IMM_HARDLOCKUP)
+		return;
+
+	*handled = hardlockup_debug_bug_handler(regs, esr) == DBG_HOOK_HANDLED;
+}
 
 static int hardlockup_debug_panic_handler(struct notifier_block *nb,
 					  unsigned long l, void *buf)
@@ -504,8 +509,16 @@ static int hardlockup_debugger_probe(struct platform_device *pdev)
 				(unsigned long)offsetof(
 				struct hardlockup_param_type, spin_func);
 
+	raw_spin_lock_init(&hardlockup_seq_lock);
+	raw_spin_lock_init(&hardlockup_log_lock);
+
 	if (hardlockup_param->last_pc_addr) {
 #ifdef SMC_CMD_LOCKUP_NOTICE
+		ret = register_trace_android_rvh_arm64_unknown_brk(
+			hardlockup_debug_brk, NULL);
+		if (ret)
+			goto error;
+
 		ret = exynos_smc(SMC_CMD_LOCKUP_NOTICE,
 			(unsigned long)hardlockup_debug_bug_func,
 			watchdog_fiq,
@@ -521,13 +534,8 @@ static int hardlockup_debugger_probe(struct platform_device *pdev)
 		goto error;
 	}
 
-	raw_spin_lock_init(&hardlockup_seq_lock);
-	raw_spin_lock_init(&hardlockup_log_lock);
-
 	atomic_notifier_chain_register(&panic_notifier_list,
 				       &hardlockup_debug_panic_nb);
-
-	register_kernel_break_hook(&hardlockup_debug_break_hook);
 
 	register_pm_notifier(&hardlockup_debugger_pm_nb);
 
@@ -560,11 +568,17 @@ static struct platform_driver hardlockup_debug_driver = {
 	.probe = hardlockup_debugger_probe,
 	.driver = {
 			.name = "hardlockup-debug-driver",
+			.suppress_bind_attrs = true,
 			.of_match_table = hardlockup_debug_dt_match,
 		},
 };
-module_platform_driver(hardlockup_debug_driver);
+/* Firmware, panic and trace callbacks retain this code for kernel lifetime. */
+static int __init hardlockup_debug_init(void)
+{
+	return platform_driver_register(&hardlockup_debug_driver);
+}
+module_init(hardlockup_debug_init);
 
 MODULE_DESCRIPTION("Module for Debugging Hardlockups via FIQ");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(MINIDUMP);
+MODULE_IMPORT_NS("MINIDUMP");

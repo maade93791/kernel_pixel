@@ -47,6 +47,7 @@
 #include <linux/uaccess.h>
 #include <linux/export.h>
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 
 #include <soc/google/exynos_pm_qos.h>
 #include "cal-if/acpm_dvfs.h"
@@ -58,7 +59,7 @@
  * @node:	&struct plist_node pointer
  * @head:	&struct plist_head pointer
  */
-void exynos_plist_add(struct plist_node *node, struct plist_head *head)
+static void exynos_plist_add(struct plist_node *node, struct plist_head *head)
 {
 	struct plist_node *first, *iter, *prev = NULL;
 	struct list_head *node_next = &head->node_list;
@@ -98,7 +99,7 @@ ins_node:
  * @node:	&struct plist_node pointer - entry to be removed
  * @head:	&struct plist_head pointer - list head
  */
-void exynos_plist_del(struct plist_node *node, struct plist_head *head)
+static void exynos_plist_del(struct plist_node *node, struct plist_head *head)
 {
 	plist_check_head(head);
 

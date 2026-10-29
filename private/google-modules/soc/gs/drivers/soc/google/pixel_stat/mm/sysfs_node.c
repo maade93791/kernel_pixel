@@ -9,6 +9,7 @@
 #include <linux/cpu.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
+#include "pixel_stat_mm.h"
 #include "cma.h"
 #include "vmscan.h"
 #include "compaction.h"

@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2024 Google LLC
  */
+#include <linux/gsa/gsa_tzprot.h>
 #include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -59,14 +60,12 @@ static int tzprot_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int tzprot_remove(struct platform_device *pdev)
+static void tzprot_remove(struct platform_device *pdev)
 {
 	struct tzprot_dev_state *s = platform_get_drvdata(pdev);
 
 	/* close connection to tz services */
 	gsa_tz_chan_close(&s->prot_srv);
-
-	return 0;
 }
 
 static const struct of_device_id tzprot_of_match[] = {

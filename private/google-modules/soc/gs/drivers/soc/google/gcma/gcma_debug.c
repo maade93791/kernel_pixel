@@ -1,34 +1,32 @@
-#include <linux/types.h>
-#include <linux/debugfs.h>
+// SPDX-License-Identifier: GPL-2.0-only
 
-#include "gcma_core.h"
+#include <linux/debugfs.h>
+#include <linux/err.h>
+#include <linux/types.h>
+
+#include "gcma_debug.h"
 
 static bool workingset = true;
+static struct dentry *gcma_debugfs_root;
 
 bool workingset_filter_enabled(void)
 {
-	return workingset;
+	return READ_ONCE(workingset);
 }
 
-static int gcma_evict_write(void *data, u64 val)
+void __init gcma_debugfs_init(void)
 {
-	unsigned long nr_pages = val;
-
-	evict_gcma_lru_pages(nr_pages);
-	return 0;
-}
-DEFINE_DEBUGFS_ATTRIBUTE(gcma_evict_fops, NULL, gcma_evict_write, "%llu\n");
-
-int __init gcma_debugfs_init(void)
-{
-	struct dentry *gcma_debugfs_root;
-
 	gcma_debugfs_root = debugfs_create_dir("gcma", NULL);
-	if (!gcma_debugfs_root)
-		return -ENOMEM;
+	if (IS_ERR(gcma_debugfs_root)) {
+		gcma_debugfs_root = NULL;
+		return;
+	}
 
 	debugfs_create_bool("workingset", 0644, gcma_debugfs_root, &workingset);
-	debugfs_create_file("evict", 0200, gcma_debugfs_root, NULL, &gcma_evict_fops);
+	/* ACK does not export its LRU eviction helper, so expose no evict file. */
+}
 
-	return 0;
+void gcma_debugfs_exit(void)
+{
+	debugfs_remove_recursive(gcma_debugfs_root);
 }

@@ -15,16 +15,7 @@
 #include "compaction.h"
 #include "page_alloc.h"
 
-extern void vh_rmqueue_mod(void *data, struct zone *preferred_zone,
-		struct zone *zone, unsigned int order, gfp_t gfp_flags,
-		unsigned int alloc_flags, int migratetype);
-extern int pixel_mm_sysfs(void);
-extern void vh_filemap_get_folio_mod(void *data,
-		struct address_space *mapping, pgoff_t index,
-		int fgp_flags, gfp_t gfp_mask, struct folio *folio);
-extern void rvh_mapping_shrinkable(void *data, bool *shrinkable);
-
-extern int create_mm_procfs_node(void);
+#include "pixel_stat_mm.h"
 
 static int pixel_stat_mm_init(void)
 {
@@ -111,3 +102,5 @@ static int pixel_stat_mm_init(void)
 module_init(pixel_stat_mm_init);
 MODULE_SOFTDEP("pre: pixel_stat_sysfs");
 MODULE_LICENSE("GPL v2");
+
+MODULE_IMPORT_NS("MINIDUMP");

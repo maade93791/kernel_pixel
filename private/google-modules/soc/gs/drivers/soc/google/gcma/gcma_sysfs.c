@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <linux/completion.h>
+#include <linux/gcma.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
 #include "gcma_sysfs.h"
@@ -7,8 +11,7 @@ extern struct kobject *vendor_mm_kobj;
 #endif
 static struct kobject *gcma_parent_kobj;
 static struct kobject gcma_kobj;
-
-static atomic64_t gcma_stats[NUM_OF_GCMA_STAT];
+static DECLARE_COMPLETION(gcma_kobj_released);
 
 enum LATENCY_LEVEL {
 	/* Do not change order */
@@ -28,21 +31,6 @@ static struct gcma_alloc_latency {
 	.lock = __SPIN_LOCK_UNLOCKED(alloc_latency.lock),
 	.threshold = {1000, 2000, 4000, ULONG_MAX},
 };
-
-void inc_gcma_stat(enum gcma_stat_type type)
-{
-	atomic64_inc(&gcma_stats[type]);
-}
-
-void dec_gcma_stat(enum gcma_stat_type type)
-{
-	atomic64_dec(&gcma_stats[type]);
-}
-
-void add_gcma_stat(enum gcma_stat_type type, unsigned long delta)
-{
-	atomic64_add(delta, &gcma_stats[type]);
-}
 
 void account_gcma_per_page_alloc_latency(unsigned long count,
 					 unsigned long latency_ns)
@@ -74,35 +62,35 @@ void account_gcma_per_page_alloc_latency(unsigned long count,
 static ssize_t stored_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%llu\n", (u64)atomic64_read(&gcma_stats[STORED_PAGE]));
+	return sysfs_emit(buf, "%llu\n", gcma_stat_get(STORED_PAGE));
 }
 GCMA_ATTR_RO(stored);
 
 static ssize_t loaded_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%llu\n", (u64)atomic64_read(&gcma_stats[LOADED_PAGE]));
+	return sysfs_emit(buf, "%llu\n", gcma_stat_get(LOADED_PAGE));
 }
 GCMA_ATTR_RO(loaded);
 
 static ssize_t evicted_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%llu\n", (u64)atomic64_read(&gcma_stats[EVICTED_PAGE]));
+	return sysfs_emit(buf, "%llu\n", gcma_stat_get(EVICTED_PAGE));
 }
 GCMA_ATTR_RO(evicted);
 
 static ssize_t cached_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%llu\n", (u64)atomic64_read(&gcma_stats[CACHED_PAGE]));
+	return sysfs_emit(buf, "%llu\n", gcma_stat_get(CACHED_PAGE));
 }
 GCMA_ATTR_RO(cached);
 
 static ssize_t discarded_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%llu\n", (u64)atomic64_read(&gcma_stats[DISCARDED_PAGE]));
+	return sysfs_emit(buf, "%llu\n", gcma_stat_get(DISCARDED_PAGE));
 }
 GCMA_ATTR_RO(discarded);
 
@@ -228,7 +216,17 @@ static const struct attribute_group *gcma_attr_groups[] = {
 
 static void gcma_kobj_release(struct kobject *obj)
 {
-	/* Never released the static objects */
+	complete(&gcma_kobj_released);
+}
+
+static void gcma_kobj_put(void)
+{
+	kobject_put(&gcma_kobj);
+	/* Keep module storage alive through CONFIG_DEBUG_KOBJECT_RELEASE. */
+	wait_for_completion(&gcma_kobj_released);
+#ifdef CONFIG_DEBUG_KOBJECT_RELEASE
+	flush_delayed_work(&gcma_kobj.release);
+#endif
 }
 
 static struct kobj_type gcma_ktype = {
@@ -239,10 +237,31 @@ static struct kobj_type gcma_ktype = {
 
 int __init gcma_sysfs_init(void)
 {
+	int ret;
+
 #if IS_ENABLED(CONFIG_VH_MM)
 	gcma_parent_kobj = vendor_mm_kobj;
 #else
 	gcma_parent_kobj = kobject_create_and_add("gcma", kernel_kobj);
 #endif
-	return kobject_init_and_add(&gcma_kobj, &gcma_ktype, gcma_parent_kobj, "gcma");
+	if (!gcma_parent_kobj)
+		return -ENOMEM;
+
+	ret = kobject_init_and_add(&gcma_kobj, &gcma_ktype, gcma_parent_kobj, "gcma");
+	if (ret) {
+		gcma_kobj_put();
+#if !IS_ENABLED(CONFIG_VH_MM)
+		kobject_put(gcma_parent_kobj);
+#endif
+	}
+	return ret;
+}
+
+void gcma_sysfs_exit(void)
+{
+	kobject_del(&gcma_kobj);
+	gcma_kobj_put();
+#if !IS_ENABLED(CONFIG_VH_MM)
+	kobject_put(gcma_parent_kobj);
+#endif
 }
