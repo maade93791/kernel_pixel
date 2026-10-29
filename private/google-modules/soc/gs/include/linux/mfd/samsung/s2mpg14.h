@@ -211,4 +211,5 @@ int s2mpg14_bulk_write(struct i2c_client *i2c, u8 reg, int count, u8 *buf);
 int s2mpg14_update_reg(struct i2c_client *i2c, u8 reg, u8 val, u8 mask);
 
 u8 s2mpg14_get_rev_id(void);
+int pmic_read_pwrkey_status(void);
 #endif /* __S2MPG14_MFD_H__ */

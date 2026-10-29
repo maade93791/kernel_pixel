@@ -22,6 +22,7 @@
 #define DSS_FREQ_MAX_SIZE		SZ_32
 #define DSS_FREQ_MAX_NAME_SIZE		SZ_8
 
+struct pt_regs;
 struct clk;
 struct clk_hw;
 struct exynos_tmu_data;
@@ -32,6 +33,7 @@ extern void dbg_snapshot_set_item_enable(const char *name, int en);
 extern int dbg_snapshot_get_item_enable(const char *name);
 extern unsigned int dbg_snapshot_get_item_size(const char *name);
 extern unsigned int dbg_snapshot_get_item_paddr(const char *name);
+extern unsigned long dbg_snapshot_get_header_paddr(void);
 extern unsigned long dbg_snapshot_get_item_vaddr(const char *name);
 extern void dbg_snapshot_output(void);
 extern void dbg_snapshot_log_output(void);
@@ -47,10 +49,12 @@ extern unsigned int dbg_snapshot_get_max_core_num(void);
 /* debug-snapshot-dpm functions */
 extern bool dbg_snapshot_get_dpm_status(void);
 extern bool dbg_snapshot_get_enabled_debug_kinfo(void);
+void dbg_snapshot_do_dpm(struct pt_regs *regs);
 extern void dbg_snapshot_do_dpm_policy(unsigned int policy, const char *str);
 /* debug-snapshot-qd functions */
 extern int dbg_snapshot_qd_add_region(void *v_entry, u32 attr);
 extern bool dbg_snapshot_qd_enabled(void);
+extern bool dbg_snapshot_qd_enable(void);
 extern void dbg_snapshot_qd_dump_stack(u64 sp);
 /*debug-snapshot-utils functions */
 extern int dbg_snapshot_get_sjtag_status(void);
@@ -189,6 +193,7 @@ static inline void dbg_snapshot_spin_func(void)
 #define dbg_snapshot_get_dpm_status() 		(0)
 #define dbg_snapshot_qd_add_region(a, b)	(-1)
 #define dbg_snapshot_qd_enabled()		(0)
+#define dbg_snapshot_qd_enable()		(0)
 
 #define dbg_snapshot_start_watchdog(a)		(-1)
 #define dbg_snapshot_emergency_reboot(a)	(-1)

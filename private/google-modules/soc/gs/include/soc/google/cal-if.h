@@ -54,6 +54,8 @@ extern unsigned long cal_dfs_get_max_freq(unsigned int id);
 extern unsigned long cal_dfs_get_min_freq(unsigned int id);
 extern int cal_dfs_set_rate(unsigned int id, unsigned long rate);
 extern int cal_dfs_set_rate_switch(unsigned int id, unsigned long switch_rate);
+int cal_dfs_set_rate_restore(unsigned int id, unsigned long switch_rate);
+void register_set_cluster_enabled_cb(void (*func)(int, int));
 extern unsigned long cal_dfs_cached_get_rate(unsigned int id);
 extern unsigned long cal_dfs_get_rate(unsigned int id);
 extern long cal_dfs_get_rate_acpm(unsigned int id);

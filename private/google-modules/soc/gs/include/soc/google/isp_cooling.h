@@ -50,6 +50,12 @@ static inline bool isp_fps_next_valid(struct isp_fps_table **pos)
 #define isp_fps_for_each_valid_entry(pos, table)	\
 	for (pos = table; isp_fps_next_valid(&pos); pos++)
 
+unsigned long isp_cooling_get_level(unsigned int isp, unsigned int fps);
+unsigned long isp_cooling_get_fps(unsigned int isp, unsigned long level);
+struct thermal_cooling_device *isp_cooling_register(const struct cpumask *clip_isp);
+struct thermal_cooling_device *of_isp_cooling_register(struct device_node *np,
+						     const struct cpumask *clip_isp);
+void isp_cooling_unregister(struct thermal_cooling_device *cdev);
 int exynos_isp_cooling_init(void);
 #else
 static inline int exynos_isp_cooling_init(void)

@@ -6,6 +6,7 @@
 #ifndef EXYNOS_TTY_H
 #define EXYNOS_TTY_H
 
+void exynos_serial_fifo_wait(void);
 bool exynos_uart_console_enabled(void);
 
 #endif

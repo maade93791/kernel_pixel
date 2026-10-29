@@ -139,6 +139,8 @@ enum ipc_frmk_cmd_id {
 #define FRAMEWORK_NAME				"FRM"
 
 #if IS_ENABLED(CONFIG_EXYNOS_ADV_TRACER)
+struct adv_tracer_ipc_cmd *adv_tracer_ipc_get_channel_cmd(unsigned int id);
+struct adv_tracer_ipc_ch *eat_ipc_get_channel(unsigned int id);
 int adv_tracer_ipc_request_channel(struct device_node *np,
 		ipc_callback handler, unsigned int *id, unsigned int *len);
 int adv_tracer_ipc_release_channel(unsigned int id);

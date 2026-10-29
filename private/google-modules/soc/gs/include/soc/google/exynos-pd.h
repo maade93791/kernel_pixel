@@ -107,17 +107,17 @@ static inline int exynos_pd_get_pd_stat(struct exynos_pm_domain *pd,
 #endif
 
 #if IS_ENABLED(CONFIG_USB_DWC3_EXYNOS_GS)
+#include <soc/google/exynos-usb-phy.h>
+
 extern u32 dwc3_otg_is_connect(void);
-extern void exynos_usbdrd_s2mpu_manual_control(bool on);
-extern int exynos_usbdrd_set_s2mpu_pm_ops(int (*cb)(struct device *dev, bool on));
 #else
 static inline u32 dwc3_otg_is_connect(void)
 {
 	return 0;
 }
-static inline void exynos_usbdrd_s2mpu_manual_control(bool on)
+static inline int exynos_usbdrd_s2mpu_manual_control(bool on)
 {
-	return;
+	return 0;
 }
 static inline int exynos_usbdrd_set_s2mpu_pm_ops(int (*cb)(struct device *dev, bool on))
 {

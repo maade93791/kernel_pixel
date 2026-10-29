@@ -18,9 +18,9 @@
 u32 acpm_get_mifdn_count(void);
 u32 acpm_get_apsocdn_count(void);
 u32 acpm_get_early_wakeup_count(void);
-int acpm_get_mif_request(void);
+u32 acpm_get_mif_request(void);
 #else
-static inline int acpm_get_mif_request(void) { return 0; }
+static inline u32 acpm_get_mif_request(void) { return 0; }
 static inline u32 acpm_get_mifdn_count(void) { return 0; }
 static inline u32 acpm_get_apsocdn_count(void) { return 0; }
 static inline u32 acpm_get_early_wakeup_count(void) { return 0; }
@@ -36,6 +36,7 @@ u32 exynos_eint_wake_mask_array[EINTMASK_ARR_SIZE] = {~0U, ~0U, ~0U};
 #endif
 
 int register_pcie_is_connect(u32 (*func)(void));
+bool is_test_pcieon_suspend_set(void);
 
 struct wakeup_stat_name {
 	const char *name[32];
