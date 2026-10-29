@@ -37,6 +37,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
+#include <linux/pinctrl/consumer.h>
 #if defined(CONFIG_FB)
 #include <linux/notifier.h>
 #include <linux/fb.h>
@@ -1110,7 +1111,7 @@ int fts_ts_set_bus_ref(struct fts_ts_data *ts, u16 ref, bool enable)
     return result;
 }
 
-struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
+static struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
 {
     struct drm_connector *connector;
     struct drm_connector_list_iter conn_iter;
@@ -1431,7 +1432,6 @@ static int fts_ptflib_decoder(struct fts_ts_data *ts_data, const u16 *in_array,
     return out_array_size;
 }
 
-extern void transpose_raw(u8 *src, u8 *dist, int tx, int rx, bool big_endian);
 static int fts_get_heatmap(struct fts_ts_data *ts_data) {
     int ret = 0;
     int i;
@@ -2513,8 +2513,7 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
     }
 
     /* reset, irq gpio info */
-    pdata->reset_gpio = of_get_named_gpio_flags(np, "focaltech,reset-gpio",
-                        0, &pdata->reset_gpio_flags);
+    pdata->reset_gpio = of_get_named_gpio(np, "focaltech,reset-gpio", 0);
     if (pdata->reset_gpio < 0)
         FTS_ERROR("Unable to get reset_gpio");
 
@@ -2557,8 +2556,7 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
         FTS_DEBUG("mm2px = %d", pdata->mm2px);
     }
 
-    pdata->irq_gpio = of_get_named_gpio_flags(np, "focaltech,irq-gpio",
-                      0, &pdata->irq_gpio_flags);
+    pdata->irq_gpio = of_get_named_gpio(np, "focaltech,irq-gpio", 0);
     if (pdata->irq_gpio < 0)
         FTS_ERROR("Unable to get irq_gpio");
 

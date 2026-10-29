@@ -60,7 +60,7 @@ static void unregister_panel_bridge(struct drm_bridge *bridge);
 int sec_ts_read_information(struct sec_ts_data *ts);
 
 #ifndef I2C_INTERFACE
-u32 sec_ts_spi_delay(u8 reg, u32 data_len)
+static u32 sec_ts_spi_delay(u8 reg, u32 data_len)
 {
 	u32 delay_us = 100;
 
@@ -101,7 +101,7 @@ u32 sec_ts_spi_delay(u8 reg, u32 data_len)
 	return delay_us;
 }
 
-int sec_ts_spi_post_delay(u8 reg)
+static int sec_ts_spi_post_delay(u8 reg)
 {
 	switch (reg) {
 	case SEC_TS_READ_TOUCH_RAWDATA:
@@ -1866,7 +1866,7 @@ static void sec_ts_handle_lib_status_event(struct sec_ts_data *ts,
 
 
 #ifdef SEC_TS_HC_KFIFO_LEN
-inline void sec_ts_hc_update_and_push(struct sec_ts_data *ts, struct sec_ts_health_check *hc)
+static inline void sec_ts_hc_update_and_push(struct sec_ts_data *ts, struct sec_ts_health_check *hc)
 {
 	hc->int_ktime = ts->timestamp;
 	hc->int_idx = ts->int_cnt;
@@ -1919,7 +1919,7 @@ inline void sec_ts_hc_dump(struct sec_ts_data *ts)
 #endif /* #ifdef SEC_TS_HC_KFIFO_LEN */
 
 #ifdef SEC_TS_DEBUG_KFIFO_LEN
-inline void sec_ts_kfifo_push_coord(struct sec_ts_data *ts, u8 slot)
+static inline void sec_ts_kfifo_push_coord(struct sec_ts_data *ts, u8 slot)
 {
 	if (slot < MAX_SUPPORT_TOUCH_COUNT) {
 		/*
@@ -1932,7 +1932,7 @@ inline void sec_ts_kfifo_push_coord(struct sec_ts_data *ts, u8 slot)
 	}
 }
 
-inline void sec_ts_kfifo_pop_all_coords(struct sec_ts_data *ts)
+static inline void sec_ts_kfifo_pop_all_coords(struct sec_ts_data *ts)
 {
 	int __maybe_unused len;
 	/*
@@ -2846,7 +2846,7 @@ static void sec_ts_populate_frame(struct sec_ts_data *ts,
 	}
 }
 
-void sec_ts_enable_ptflib(struct sec_ts_data *ts, bool enable)
+static void sec_ts_enable_ptflib(struct sec_ts_data *ts, bool enable)
 {
 	struct sec_ts_plat_data *pdata = ts->plat_data;
 
@@ -2866,7 +2866,7 @@ void sec_ts_enable_ptflib(struct sec_ts_data *ts, bool enable)
 	}
 }
 
-int sec_ts_enable_fw_grip(struct sec_ts_data *ts, bool enable)
+static int sec_ts_enable_fw_grip(struct sec_ts_data *ts, bool enable)
 {
 	struct sec_ts_plat_data *pdata = ts->plat_data;
 	u8 value;
@@ -3868,7 +3868,7 @@ static int sec_ts_parse_dt(struct spi_device *client)
 
 	pdata->irq_gpio = of_get_named_gpio(np, "sec,irq_gpio", 0);
 	if (gpio_is_valid(pdata->irq_gpio)) {
-		ret = gpio_request_one(pdata->irq_gpio, GPIOF_DIR_IN,
+		ret = gpio_request_one(pdata->irq_gpio, GPIOF_IN,
 				       "sec,tsp_int");
 		if (ret) {
 			input_err(true, &client->dev,
@@ -4893,7 +4893,7 @@ static int sec_ts_probe(struct spi_device *client)
 #endif
 
 #ifndef CONFIG_SEC_SYSFS
-	sec_class = class_create(THIS_MODULE, "sec");
+	sec_class = class_create("sec");
 #endif
 
 	device_init_wakeup(&client->dev, true);
@@ -5125,7 +5125,7 @@ static void sec_ts_reset_work(struct work_struct *work)
 }
 #endif
 
-void sec_ts_read_init_info(struct sec_ts_data *ts)
+static void sec_ts_read_init_info(struct sec_ts_data *ts)
 {
 #ifndef CONFIG_SEC_FACTORY
 	struct sec_ts_test_mode mode;
@@ -6168,7 +6168,7 @@ int sec_ts_set_bus_ref(struct sec_ts_data *ts, u16 ref, bool enable)
 	return result;
 }
 
-struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
+static struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
 {
 	struct drm_connector *connector;
 	struct drm_connector_list_iter conn_iter;

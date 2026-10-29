@@ -52,6 +52,7 @@
 
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 
 #ifdef KERNEL_ABOVE_2_6_38
@@ -120,7 +121,8 @@ static void fts_pinctrl_setup(struct fts_ts_info *info, bool active);
 
 static int fts_chip_initialization(struct fts_ts_info *info, int init_type);
 static int register_panel_bridge(struct fts_ts_info *info);
-static void unregister_panel_bridge(struct drm_bridge *bridge);
+static void unregister_panel_bridge(struct fts_ts_info *info);
+static const struct drm_bridge_funcs panel_bridge_funcs;
 
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_OFFLOAD)
 static void fts_offload_push_coord_frame(struct fts_ts_info *info);
@@ -130,7 +132,7 @@ static void fts_offload_push_coord_frame(struct fts_ts_info *info);
   * Release all the touches in the linux input subsystem
   * @param info pointer to fts_ts_info which contains info about device/hw setup
   */
-void release_all_touches(struct fts_ts_info *info)
+static void release_all_touches(struct fts_ts_info *info)
 {
 	unsigned int type = MT_TOOL_FINGER;
 	int i;
@@ -575,7 +577,7 @@ END:
   * @return OK if is possible to enable/disable feature, ERROR_OP_NOT_ALLOW
   * in case of any other conflict
   */
-int check_feature_feasibility(struct fts_ts_info *info, unsigned int feature)
+static int check_feature_feasibility(struct fts_ts_info *info, unsigned int feature)
 {
 	int res = OK;
 
@@ -1594,8 +1596,8 @@ static int touchsim_start(struct fts_touchsim *touchsim)
 	release_all_touches(info);
 
 	/* setup and start a hr timer to be fired every 120Hz(~8.333333ms) */
-	hrtimer_init(&touchsim->hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	touchsim->hr_timer.function = touchsim_timer_cb;
+	hrtimer_setup(&touchsim->hr_timer, touchsim_timer_cb,
+		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	hrtimer_start(&touchsim->hr_timer,
 			ns_to_ktime(TOUCHSIM_TIMER_INTERVAL_NS),
 			HRTIMER_MODE_ABS);
@@ -1780,7 +1782,7 @@ out:
   * - F1 = Perform a system reset and reenable the sensing and the interrupt
   */
 static ssize_t stm_fts_cmd_write(struct file *fp, struct kobject *kobj,
-				 struct bin_attribute *battr, char *buf,
+				 const struct bin_attribute *battr, char *buf,
 				 loff_t offset, size_t count)
 {
 	u8 result, n = 0;
@@ -1889,7 +1891,7 @@ out:
 }
 
 static ssize_t stm_fts_cmd_read(struct file *fp, struct kobject *kobj,
-				struct bin_attribute *battr, char *buf,
+				const struct bin_attribute *battr, char *buf,
 				loff_t offset, size_t count)
 {
 	int res, j, doClean = 0, index = 0;
@@ -2868,7 +2870,7 @@ static DEVICE_ATTR_RW(default_mf);
 
 static BIN_ATTR_RW(stm_fts_cmd, 0);
 
-static struct bin_attribute *fts_bin_attr_group[] = {
+static const struct bin_attribute *fts_bin_attr_group[] = {
 	&bin_attr_stm_fts_cmd,
 	NULL,
 };
@@ -2938,7 +2940,8 @@ static struct attribute *fts_attr_group[] = {
   * and its hw setup
   * @param key_code	button value
   */
-void fts_input_report_key(struct fts_ts_info *info, int key_code)
+#if defined(PHONE_KEY) || defined(GESTURE_MODE)
+static void fts_input_report_key(struct fts_ts_info *info, int key_code)
 {
 	mutex_lock(&info->input_report_mutex);
 	input_report_key(info->input_dev, key_code, 1);
@@ -2947,6 +2950,7 @@ void fts_input_report_key(struct fts_ts_info *info, int key_code)
 	input_sync(info->input_dev);
 	mutex_unlock(&info->input_report_mutex);
 }
+#endif
 
 /**
   * Palm data dump work function which perform capture the MS raw, strength,
@@ -4158,7 +4162,7 @@ static int update_motion_filter(struct fts_ts_info *info,
 	return 0;
 }
 
-int fts_enable_grip(struct fts_ts_info *info, bool enable)
+static int fts_enable_grip(struct fts_ts_info *info, bool enable)
 {
 	uint8_t enable_cmd[] = {
 		0xC0, 0x03, 0x10, 0xFF, 0x03, 0x00, 0x00, 0x00, 0x00};
@@ -5198,7 +5202,8 @@ static void fts_fw_update_auto(struct work_struct *work)
  *  Save the golden MS raw data to the touch IC if firmware has separated it
  *  from the PI process.
  */
-int save_golden_ms_raw(struct fts_ts_info *info)
+#if !defined(COMPUTE_INIT_METHOD)
+static int save_golden_ms_raw(struct fts_ts_info *info)
 {
 	u8 cmd[3] = {0xC0, 0x01, 0x01};
 	int ret = 0;
@@ -5212,6 +5217,7 @@ int save_golden_ms_raw(struct fts_ts_info *info)
 	}
 	return ret;
 }
+#endif
 
 /* TODO: define if need to do the full mp at the boot */
 /**
@@ -5275,6 +5281,9 @@ static int fts_interrupt_install(struct fts_ts_info *info)
 {
 	int i, error = 0;
 
+	if (info->irq_registered)
+		return 0;
+
 	info->event_dispatch_table = kzalloc(sizeof(event_dispatch_handler_t) *
 					     NUM_EVT_ID, GFP_KERNEL);
 
@@ -5296,20 +5305,23 @@ static int fts_interrupt_install(struct fts_ts_info *info)
 
 	/* disable interrupts in any case */
 	error = fts_enableInterrupt(info, false);
-	if (error) {
-		return error;
-	}
+	if (error)
+		goto free_dispatch;
 
 	error = request_threaded_irq(info->client->irq, fts_isr,
 			fts_interrupt_handler, IRQF_ONESHOT | IRQF_TRIGGER_LOW,
 			FTS_TS_DRV_NAME, info);
-	info->irq_enabled = true;
-
 	if (error) {
 		dev_err(info->dev, "Request irq failed\n");
-		kfree(info->event_dispatch_table);
+		goto free_dispatch;
 	}
+	info->irq_enabled = true;
+	info->irq_registered = true;
+	return 0;
 
+free_dispatch:
+	kfree(info->event_dispatch_table);
+	info->event_dispatch_table = NULL;
 	return error;
 }
 
@@ -5319,11 +5331,16 @@ static int fts_interrupt_install(struct fts_ts_info *info)
   */
 static void fts_interrupt_uninstall(struct fts_ts_info *info)
 {
+	if (!info->irq_registered)
+		return;
+
 	fts_enableInterrupt(info, false);
-
-	kfree(info->event_dispatch_table);
-
+	/* Wait for the threaded handler before releasing its dispatch table. */
 	free_irq(info->client->irq, info);
+	info->irq_registered = false;
+	info->irq_enabled = false;
+	kfree(info->event_dispatch_table);
+	info->event_dispatch_table = NULL;
 }
 
 /**@}*/
@@ -5448,7 +5465,8 @@ static int fts_init_sensing(struct fts_ts_info *info)
 	error |= fts_interrupt_install(info);	  /* register event handler */
 	error |= fts_mode_handler(info, 0);	  /* enable the features and
 						   * sensing */
-	error |= fts_enableInterrupt(info, true); /* enable the interrupt */
+	if (info->irq_registered)
+		error |= fts_enableInterrupt(info, true); /* enable the interrupt */
 
 	if (error < OK)
 		dev_err(info->dev, "%s Init after Probe error (ERROR = %08X)\n",
@@ -5941,7 +5959,7 @@ int fts_set_bus_ref(struct fts_ts_info *info, u16 ref, bool enable)
 	return result;
 }
 
-struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
+static struct drm_connector *get_bridge_connector(struct drm_bridge *bridge)
 {
 	struct drm_connector *connector;
 	struct drm_connector_list_iter conn_iter;
@@ -6029,35 +6047,46 @@ static const struct drm_bridge_funcs panel_bridge_funcs = {
 
 static int register_panel_bridge(struct fts_ts_info *info)
 {
-
+	if (info->panel_bridge_registered)
+		return 0;
 #ifdef CONFIG_OF
 	info->panel_bridge.of_node = info->client->dev.of_node;
 #endif
-	info->panel_bridge.funcs = &panel_bridge_funcs;
 	drm_bridge_add(&info->panel_bridge);
-
+	info->panel_bridge_registered = true;
 	return 0;
 }
 
-static void unregister_panel_bridge(struct drm_bridge *bridge)
+static void unregister_panel_bridge(struct fts_ts_info *info)
 {
-	struct drm_bridge *node;
+	struct drm_bridge *bridge = &info->panel_bridge;
+	struct drm_device *drm;
 
+	/* Firmware work is drained before removal; early probe may never add it. */
+	if (!info->panel_bridge_registered)
+		return;
+	info->panel_bridge_registered = false;
 	drm_bridge_remove(bridge);
 
-	if (!bridge->dev) /* not attached */
+	drm = bridge->dev;
+	if (!drm)
 		return;
 
-	drm_modeset_lock(&bridge->dev->mode_config.connection_mutex, NULL);
-	list_for_each_entry(node, &bridge->encoder->bridge_chain, chain_node)
-		if (node == bridge) {
-			if (bridge->funcs->detach)
-				bridge->funcs->detach(bridge);
-			list_del(&bridge->chain_node);
-			break;
-		}
-	drm_modeset_unlock(&bridge->dev->mode_config.connection_mutex);
-	bridge->dev = NULL;
+	/* Retain the existing KMS topology lock; native detach balances its ref. */
+	drm_modeset_lock(&drm->mode_config.connection_mutex, NULL);
+	if (bridge->dev == drm)
+		drm_bridge_detach(bridge);
+	drm_modeset_unlock(&drm->mode_config.connection_mutex);
+}
+
+static void fts_stop_fw_update(struct fts_ts_info *info)
+{
+	if (!info->fwu_workqueue)
+		return;
+
+	cancel_delayed_work_sync(&info->fwu_work);
+	destroy_workqueue(info->fwu_workqueue);
+	info->fwu_workqueue = NULL;
 }
 
 /**
@@ -6417,20 +6446,18 @@ static int parse_dt(struct device *dev, struct fts_hw_platform_data *bdata)
 	bdata->switch_gpio = of_get_named_gpio(np, "st,switch_gpio", 0);
 	dev_info(dev, "switch_gpio = %d\n", bdata->switch_gpio);
 
-	bdata->irq_gpio = of_get_named_gpio_flags(np, "st,irq-gpio", 0, NULL);
+	bdata->irq_gpio = of_get_named_gpio(np, "st,irq-gpio", 0);
 	dev_info(dev, "irq_gpio = %d\n", bdata->irq_gpio);
 
 	if (of_property_read_bool(np, "st,reset-gpio")) {
-		bdata->reset_gpio = of_get_named_gpio_flags(np,
-							    "st,reset-gpio", 0,
-							    NULL);
+		bdata->reset_gpio = of_get_named_gpio(np, "st,reset-gpio", 0);
 		dev_info(dev, "reset_gpio = %d\n", bdata->reset_gpio);
 	} else
 		bdata->reset_gpio = GPIO_NOT_DEFINED;
 
 	if (of_property_read_bool(np, "st,disp-rate-gpio")) {
 		bdata->disp_rate_gpio =
-		    of_get_named_gpio_flags(np, "st,disp-rate-gpio", 0, NULL);
+		    of_get_named_gpio(np, "st,disp-rate-gpio", 0);
 		dev_info(dev, "disp_rate_gpio = %d\n", bdata->disp_rate_gpio);
 	} else
 		bdata->disp_rate_gpio = GPIO_NOT_DEFINED;
@@ -6587,10 +6614,11 @@ static int fts_probe(struct spi_device *client)
 #endif
 	dev_info(&client->dev, "SET Device driver INFO:\n");
 
-	info = kzalloc(sizeof(struct fts_ts_info), GFP_KERNEL);
-	if (!info) {
-		dev_err(&client->dev, "Out of memory... Impossible to allocate struct info!\n");
-		error = -ENOMEM;
+	info = devm_drm_bridge_alloc(&client->dev, struct fts_ts_info,
+				     panel_bridge, &panel_bridge_funcs);
+	if (IS_ERR(info)) {
+		error = PTR_ERR(info);
+		dev_err(&client->dev, "Cannot allocate touch bridge: %d\n", error);
 		goto ProbeErrorExit_0;
 	}
 
@@ -6610,6 +6638,7 @@ static int fts_probe(struct spi_device *client)
 					   GFP_KERNEL);
 		if (!info->board) {
 			dev_err(info->dev, "ERROR:info.board kzalloc failed\n");
+			error = -ENOMEM;
 			goto ProbeErrorExit_1;
 		}
 		error = parse_dt(&client->dev, info->board);
@@ -6937,6 +6966,7 @@ static int fts_probe(struct spi_device *client)
 					      WQ_CPU_INTENSIVE, 1);
 	if (!info->fwu_workqueue) {
 		dev_err(info->dev, "ERROR: Cannot create fwu work thread\n");
+		error = -ENOMEM;
 		goto ProbeErrorExit_7;
 	}
 	INIT_DELAYED_WORK(&info->fwu_work, fts_fw_update_auto);
@@ -6980,10 +7010,12 @@ static int fts_probe(struct spi_device *client)
 
 
 ProbeErrorExit_7:
+	fts_stop_fw_update(info);
 	if(info->touchsim.wq)
 		destroy_workqueue(info->touchsim.wq);
 
-	unregister_panel_bridge(&info->panel_bridge);
+	unregister_panel_bridge(info);
+	fts_interrupt_uninstall(info);
 
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_OFFLOAD)
 	touch_offload_cleanup(&info->offload);
@@ -7005,7 +7037,6 @@ ProbeErrorExit_5:
 	destroy_workqueue(info->event_wq);
 
 ProbeErrorExit_4:
-	/* destroy_workqueue(info->fwu_workqueue); */
 	wakeup_source_unregister(info->wakesrc);
 
 ProbeErrorExit_3:
@@ -7021,11 +7052,11 @@ ProbeErrorExit_2:
 	fts_get_reg(info, false);
 
 ProbeErrorExit_1:
-	kfree(info);
+	dev_set_drvdata(&client->dev, NULL);
 
 ProbeErrorExit_0:
 	if (error != -EPROBE_DEFER)
-		dev_err(info->dev, "Probe Failed!\n");
+		dev_err(&client->dev, "Probe Failed!\n");
 
 	return error;
 }
@@ -7050,6 +7081,9 @@ static void fts_remove(struct spi_device *client)
 
 	dev_info(info->dev, "%s\n", __func__);
 
+	/* Firmware work can register the panel bridge and install touch IRQs. */
+	fts_stop_fw_update(info);
+
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_TBN)
 	if (info->tbn_register_mask)
 		unregister_tbn(&info->tbn_register_mask);
@@ -7073,7 +7107,7 @@ static void fts_remove(struct spi_device *client)
 
 	cpu_latency_qos_remove_request(&info->pm_qos_req);
 
-	unregister_panel_bridge(&info->panel_bridge);
+	unregister_panel_bridge(info);
 
 	/* unregister the device */
 	input_unregister_device(info->input_dev);
@@ -7086,9 +7120,6 @@ static void fts_remove(struct spi_device *client)
 
 	if(info->touchsim.wq)
 		destroy_workqueue(info->touchsim.wq);
-
-	if (info->fwu_workqueue)
-		destroy_workqueue(info->fwu_workqueue);
 
 	fts_pinctrl_get(info, false);
 
@@ -7108,8 +7139,8 @@ static void fts_remove(struct spi_device *client)
 	/* free any extinfo */
 	kfree(info->extinfo.data);
 
-	/* free all */
-	kfree(info);
+	/* The native bridge allocation reference is released by devres. */
+	dev_set_drvdata(&client->dev, NULL);
 }
 
 #ifdef CONFIG_PM

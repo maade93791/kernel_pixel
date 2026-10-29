@@ -13,7 +13,7 @@
 #ifndef __SEC_TS_H__
 #define __SEC_TS_H__
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/completion.h>
 #include <linux/ctype.h>
 #include <linux/delay.h>
@@ -1239,6 +1239,14 @@ struct sec_ts_plat_data {
 	u8 mm2px;
 };
 
+int sec_ts_write(struct sec_ts_data *ts, u8 reg, u8 *data, int len);
+int sec_ts_read(struct sec_ts_data *ts, u8 reg, u8 *data, int len);
+int sec_ts_read_heap(struct sec_ts_data *ts, u8 reg, u8 *data, int len);
+int sec_ts_write_burst(struct sec_ts_data *ts, u8 *data, int len);
+int sec_ts_write_burst_heap(struct sec_ts_data *ts, u8 *data, int len);
+int sec_ts_read_bulk(struct sec_ts_data *ts, u8 *data, int len);
+int sec_ts_read_bulk_heap(struct sec_ts_data *ts, u8 *data, int len);
+int get_tsp_status(void);
 void sec_ts_hc_dump(struct sec_ts_data *ts);
 void sec_ts_debug_dump(struct sec_ts_data *ts);
 int sec_ts_stop_device(struct sec_ts_data *ts);
@@ -1269,6 +1277,8 @@ int sec_ts_execute_force_calibration(struct sec_ts_data *ts, int cal_mode);
 int sec_ts_fix_tmode(struct sec_ts_data *ts, u8 mode, u8 state);
 int sec_ts_release_tmode(struct sec_ts_data *ts);
 int get_tsp_nvm_data(struct sec_ts_data *ts, u8 offset);
+int get_tsp_nvm_data_by_size(struct sec_ts_data *ts, u8 offset,
+			     int length, u8 *data);
 void set_tsp_nvm_data_clear(struct sec_ts_data *ts, u8 offset);
 #ifdef SEC_TS_SUPPORT_CUSTOMLIB
 int sec_ts_set_custom_library(struct sec_ts_data *ts);

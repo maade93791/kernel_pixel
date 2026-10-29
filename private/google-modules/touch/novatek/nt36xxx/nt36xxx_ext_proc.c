@@ -93,7 +93,7 @@ void nvt_change_mode(uint8_t mode)
 	}
 }
 
-int32_t nvt_set_pen_inband_mode_1(uint8_t freq_idx, uint8_t x_term)
+static int32_t nvt_set_pen_inband_mode_1(uint8_t freq_idx, uint8_t x_term)
 {
 	uint8_t buf[8] = {0};
 	int32_t i = 0;
@@ -129,7 +129,7 @@ int32_t nvt_set_pen_inband_mode_1(uint8_t freq_idx, uint8_t x_term)
 	}
 }
 
-int32_t nvt_set_pen_normal_mode(void)
+static int32_t nvt_set_pen_normal_mode(void)
 {
 	uint8_t buf[8] = {0};
 	int32_t i = 0;

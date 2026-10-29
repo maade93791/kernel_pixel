@@ -137,7 +137,6 @@ struct fts_ts_platform_data {
     u32 irq_gpio;
     u32 irq_gpio_flags;
     u32 reset_gpio;
-    u32 reset_gpio_flags;
     struct drm_panel *panel;
     u32 initial_panel_index;
     bool have_key;
@@ -491,5 +490,7 @@ void fts_irq_enable(void);
 /* Bus reference tracking */
 int fts_ts_set_bus_ref(struct fts_ts_data *ts, u16 ref, bool enable);
 #endif
+
+void transpose_raw(u8 *src, u8 *dist, int tx, int rx, bool big_endian);
 
 #endif /* __LINUX_FOCALTECH_CORE_H__ */

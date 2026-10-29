@@ -868,6 +868,7 @@ struct fts_ts_info {
 
 	spinlock_t fts_int;	/* Spinlock to protect interrupt toggling */
 	bool irq_enabled;	/* Interrupt state */
+	bool irq_registered;	/* Owns the requested IRQ and dispatch table */
 
 	struct mutex io_mutex;	/* Protect access to the I/O */
 	struct mutex bus_mutex;	/* Protect access to the bus */
@@ -881,6 +882,7 @@ struct fts_ts_info {
 	struct fts_disp_extinfo extinfo;	/* Display extended info */
 
 	struct drm_bridge panel_bridge;
+	bool panel_bridge_registered;
 	struct drm_connector *connector;
 	bool is_panel_lp_mode;
 #ifdef DYNAMIC_REFRESH_RATE
