@@ -291,7 +291,7 @@ dhd_flow_ring_config_thresholds(dhd_pub_t *dhdp, uint16 flowid,
  * For prio2ac mapping, it will return 4, prio2ac[8] = { 0, 1, 1, 0, 2, 2, 3, 3 }
  * For prio2tid mapping, it will return 8, prio2tid[8] = { 0, 1, 2, 3, 4, 5, 6, 7 }
  */
-uint8
+static uint8
 dhd_num_prio_supported_per_flow_ring(dhd_pub_t *dhdp)
 {
 	uint8 prio_count = 0;
@@ -315,7 +315,7 @@ dhd_num_prio_supported_per_flow_ring(dhd_pub_t *dhdp)
 	return prio_count;
 }
 
-uint8
+static uint8
 dhd_get_max_multi_client_flow_rings(dhd_pub_t *dhdp)
 {
 	uint8 reserved_infra_sta_flow_rings = dhd_num_prio_supported_per_flow_ring(dhdp);
@@ -324,7 +324,7 @@ dhd_get_max_multi_client_flow_rings(dhd_pub_t *dhdp)
 	return max_multi_client_flow_rings;
 }
 
-int
+static int
 dhd_flowid_map_init(dhd_pub_t *dhdp, uint16 max_tx_flow_rings)
 {
 #if defined(DHD_HTPUT_TUNABLES)
@@ -362,7 +362,7 @@ dhd_flowid_map_init(dhd_pub_t *dhdp, uint16 max_tx_flow_rings)
 	return BCME_OK;
 }
 
-void
+static void
 dhd_flowid_map_deinit(dhd_pub_t *dhdp)
 {
 	if (dhdp->flowid_allocator) {
@@ -602,7 +602,7 @@ dhd_flow_rings_ifindex2role(dhd_pub_t *dhdp, uint8 ifindex)
 }
 
 #ifdef WLTDLS
-bool is_tdls_destination(dhd_pub_t *dhdp, uint8 *da)
+static bool is_tdls_destination(dhd_pub_t *dhdp, uint8 *da)
 {
 	unsigned long flags;
 	tdls_peer_node_t *cur = NULL;

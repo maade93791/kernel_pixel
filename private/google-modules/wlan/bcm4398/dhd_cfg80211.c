@@ -162,6 +162,9 @@ struct net_device * dhd_cfg80211_netdev_free(struct net_device *ndev)
 	if (ndev) {
 		cfg = wl_get_cfg(ndev);
 		if (ndev->ieee80211_ptr) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			wl_cfg80211_quiesce_wiphy_events(ndev->ieee80211_ptr);
+#endif
 			MFREE(cfg->osh, ndev->ieee80211_ptr, sizeof(struct wireless_dev));
 			ndev->ieee80211_ptr = NULL;
 		}
@@ -416,7 +419,7 @@ static s32 wl_dongle_filter(struct net_device *ndev, u32 filter_mode)
 	/* add a default packet filter pattern */
 	str = "pkt_filter_add";
 	str_len = strlen(str);
-	strlcpy(buf, str, sizeof(buf));
+	strscpy(buf, str, sizeof(buf));
 	buf_len = str_len + 1;
 
 	pkt_filterp = (struct wl_pkt_filter *)(buf + str_len + 1);

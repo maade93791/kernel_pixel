@@ -324,9 +324,11 @@ mlme_set_mbssid_info(struct wlan_objmgr_vdev *vdev,
 		     struct scan_mbssid_info *mbssid_info);
 
 /**
- * mlme_get_mbssid_info() - get mbssid info
- * @vdev: vdev pointer
- * @mbss_11ax: mbss 11ax info
+ * mlme_get_mbssid_info() - copy mbssid info to the caller's record
+ * @vdev: vdev pointer, whose lifetime is retained by the caller
+ * @mbss_11ax: output record, unchanged if the component is unavailable
+ *
+ * Copies all native MBSSID fields; no internal pointer or ownership is returned.
  *
  * Return: None
  */

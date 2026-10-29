@@ -61,7 +61,7 @@
 #endif /* ENABLE_ADAPTIVE_SCHED */
 #include <linux/rtc.h>
 #include <asm/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <dhd_linux_priv.h>
 
 #include <epivers.h>
@@ -2979,7 +2979,7 @@ _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 		return;
 	}
 
-	strlcpy(bufp, "mcast_list", buflen);
+	strscpy(bufp, "mcast_list", buflen);
 	bufp += strlen("mcast_list") + 1;
 
 	cnt = htol32(cnt);
@@ -3232,11 +3232,68 @@ int32 dhd_role_to_nl80211_iftype(int32 role)
 }
 #endif /* WL_CFG80211 && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/*
+ * Process-owned native interface transition. No private lock is held while
+ * acquiring RTNL or closing an UP netdev. Success owns RTNL -> wiphy -> net-if.
+ */
+struct wiphy *dhd_netdev_lifecycle_lock(dhd_pub_t *dhdp, int ifidx)
+{
+	dhd_info_t *dhd = dhdp->info;
+	struct net_device *primary, *target = NULL;
+	struct wiphy *wiphy;
+
+	if (ifidx <= 0 || ifidx >= DHD_MAX_IFS)
+		return ERR_PTR(-EINVAL);
+	while (!rtnl_trylock()) {
+		/* Primary stop joins deferred work while it owns RTNL. */
+		if (READ_ONCE(dhd->if_lifecycle_stopping) ||
+		    READ_ONCE(dhd->if_lifecycle_draining))
+			return ERR_PTR(-ESHUTDOWN);
+		OSL_SLEEP(20);
+	}
+	dhd_net_if_lock_local(dhd);
+	primary = dhd->iflist[0] ? dhd->iflist[0]->net : NULL;
+	if (READ_ONCE(dhd->if_lifecycle_stopping) || !primary || !primary->ieee80211_ptr) {
+		dhd_net_if_unlock_local(dhd);
+		rtnl_unlock();
+		return ERR_PTR(-ESHUTDOWN);
+	}
+	wiphy = primary->ieee80211_ptr->wiphy;
+	if (dhd->iflist[ifidx])
+		target = dhd->iflist[ifidx]->net;
+#ifdef WL_STATIC_IF
+	/* Firmware deletion leaves persistent static host netdevs registered. */
+	if (target && IS_CFG80211_STATIC_IF(wl_get_cfg(primary), target))
+		target = NULL;
+#endif
+	dhd_net_if_unlock_local(dhd);
+
+	/* RTNL pins registration/slots against every native lifecycle mutator. */
+	if (target && target->reg_state == NETREG_REGISTERED && (target->flags & IFF_UP))
+		dev_close(target);
+	wiphy_lock(wiphy);
+	dhd_net_if_lock_local(dhd);
+	return wiphy;
+}
+
+void dhd_netdev_lifecycle_unlock(dhd_pub_t *dhdp, struct wiphy *wiphy)
+{
+	dhd_net_if_unlock_local(dhdp->info);
+	wiphy_unlock(wiphy);
+	rtnl_unlock();
+}
+#endif
+
 static void
 dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 {
 	dhd_info_t *dhd = handle;
 	dhd_if_event_t *if_event = event_info;
+	bool need_rtnl_lock = true;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy;
+#endif
 	int ifidx, bssidx;
 	int ret = 0;
 #if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
@@ -3261,7 +3318,18 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 		return;
 	}
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wiphy = dhd_netdev_lifecycle_lock(&dhd->pub, if_event->event.ifidx);
+	if (IS_ERR(wiphy)) {
+		DHD_TRACE(("%s: interface work rejected (%ld)\n",
+			__FUNCTION__, PTR_ERR(wiphy)));
+		MFREE(dhd->pub.osh, if_event, sizeof(*if_event));
+		return;
+	}
+	need_rtnl_lock = false;
+#else
 	dhd_net_if_lock_local(dhd);
+#endif
 
 	ifidx = if_event->event.ifidx;
 	bssidx = if_event->event.bssidx;
@@ -3274,7 +3342,7 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 		info.ifidx = ifidx;
 		info.bssidx = bssidx;
 		info.role = if_event->event.role;
-		strlcpy(info.name, if_event->name, sizeof(info.name));
+		strscpy(info.name, if_event->name, sizeof(info.name));
 		if (is_valid_ether_addr(if_event->mac)) {
 			mac_addr = if_event->mac;
 		} else {
@@ -3282,7 +3350,7 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 		}
 
 		if (wl_cfg80211_post_ifcreate(dhd->pub.info->iflist[0]->net,
-			&info, mac_addr, NULL, true) == NULL) {
+			&info, mac_addr, NULL, need_rtnl_lock) == NULL) {
 			/* Do the post interface create ops */
 			DHD_ERROR(("Post ifcreate ops failed. Returning \n"));
 			ret = BCME_ERROR;
@@ -3294,17 +3362,17 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 	/* The interface name in host and in event msg are same */
 	/* if name in event msg is used to create dongle if list on host */
 	ndev = dhd_allocate_if(&dhd->pub, ifidx, if_event->name,
-		if_event->mac, bssidx, TRUE, if_event->name);
+		if_event->mac, bssidx, need_rtnl_lock, if_event->name);
 	if (!ndev) {
 		DHD_ERROR(("%s: net device alloc failed  \n", __FUNCTION__));
 		ret = BCME_NOMEM;
 		goto done;
 	}
 
-	ret = dhd_register_if(&dhd->pub, ifidx, TRUE);
+	ret = dhd_register_if(&dhd->pub, ifidx, need_rtnl_lock);
 	if (ret != BCME_OK) {
 		DHD_ERROR(("%s: dhd_register_if failed\n", __FUNCTION__));
-		dhd_remove_if(&dhd->pub, ifidx, TRUE);
+		dhd_remove_if(&dhd->pub, ifidx, need_rtnl_lock);
 		goto done;
 	}
 
@@ -3318,7 +3386,7 @@ dhd_ifadd_event_handler(void *handle, void *event_info, u8 event)
 				NULL, 0, TRUE);
 		if (ret != BCME_OK) {
 			DHD_ERROR(("%s: Failed to set ap_isolate to dongle\n", __FUNCTION__));
-			dhd_remove_if(&dhd->pub, ifidx, TRUE);
+			dhd_remove_if(&dhd->pub, ifidx, need_rtnl_lock);
 		}
 	}
 #endif /* PCIE_FULL_DONGLE */
@@ -3327,7 +3395,11 @@ done:
 
 	MFREE(dhd->pub.osh, if_event, sizeof(dhd_if_event_t));
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	dhd_netdev_lifecycle_unlock(&dhd->pub, wiphy);
+#else
 	dhd_net_if_unlock_local(dhd);
+#endif
 }
 
 static void
@@ -3336,6 +3408,10 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	dhd_info_t *dhd = handle;
 	int ifidx;
 	dhd_if_event_t *if_event = event_info;
+	bool need_rtnl_lock = true;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy;
+#endif
 
 	if (event != DHD_WQ_WORK_IF_DEL) {
 		DHD_ERROR(("%s: unexpected event \n", __FUNCTION__));
@@ -3352,7 +3428,18 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 		return;
 	}
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wiphy = dhd_netdev_lifecycle_lock(&dhd->pub, if_event->event.ifidx);
+	if (IS_ERR(wiphy)) {
+		DHD_TRACE(("%s: interface work rejected (%ld)\n",
+			__FUNCTION__, PTR_ERR(wiphy)));
+		MFREE(dhd->pub.osh, if_event, sizeof(*if_event));
+		return;
+	}
+	need_rtnl_lock = false;
+#else
 	dhd_net_if_lock_local(dhd);
+#endif
 
 	ifidx = if_event->event.ifidx;
 	DHD_TRACE(("Removing interface with idx %d\n", ifidx));
@@ -3366,20 +3453,24 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	if (if_event->event.ifidx > 0) {
 		/* Do the post interface del ops */
 		if (wl_cfg80211_post_ifdel(dhd->pub.info->iflist[ifidx]->net,
-				true, if_event->event.ifidx) != 0) {
+				need_rtnl_lock, if_event->event.ifidx) != 0) {
 			DHD_TRACE(("Post ifdel ops failed. Returning \n"));
 			goto done;
 		}
 	}
 #else
 	/* For non-cfg80211 drivers */
-	dhd_remove_if(&dhd->pub, ifidx, TRUE);
+	dhd_remove_if(&dhd->pub, ifidx, need_rtnl_lock);
 
 #endif /* WL_CFG80211 && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
 
 done:
 	MFREE(dhd->pub.osh, if_event, sizeof(dhd_if_event_t));
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	dhd_netdev_lifecycle_unlock(&dhd->pub, wiphy);
+#else
 	dhd_net_if_unlock_local(dhd);
+#endif
 }
 
 static void
@@ -5267,7 +5358,7 @@ dhd_ethtool(dhd_info_t *dhd, void *uaddr)
 				"truncating last byte with null\n", __FUNCTION__));
 			info.driver[sizeof(info.driver) - 1] = '\0';
 		}
-		strlcpy(drvname, info.driver, sizeof(drvname));
+		strscpy(drvname, info.driver, sizeof(drvname));
 
 		/* clear struct for return */
 		memset(&info, 0, sizeof(info));
@@ -5276,7 +5367,7 @@ dhd_ethtool(dhd_info_t *dhd, void *uaddr)
 		/* if dhd requested, identify ourselves */
 		if (strcmp(drvname, "?dhd") == 0) {
 			snprintf(info.driver, sizeof(info.driver), "dhd");
-			strlcpy(info.version, EPI_VERSION_STR, sizeof(info.version));
+			strscpy(info.version, EPI_VERSION_STR, sizeof(info.version));
 		}
 
 		/* otherwise, require dongle to be up */
@@ -6506,7 +6597,7 @@ dhd_stop(struct net_device *net)
 	bool skip_reset = false;
 #ifdef WL_CFG80211
 	unsigned long flags = 0;
-#ifdef WL_STATIC_IF
+#if defined(WL_STATIC_IF) || (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 	struct bcm_cfg80211 *cfg = wl_get_cfg(net);
 #endif /* WL_STATIC_IF */
 #if defined(CONFIG_IPV6) && defined(IPV6_NDO_SUPPORT)
@@ -6610,6 +6701,10 @@ dhd_stop(struct net_device *net)
 		 * For CFG80211: Clean up all the left over virtual interfaces
 		 * when the primary Interface is brought down. [ifconfig wlan0 down]
 		 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		/* The deferred-work join below must never wait for an RTNL waiter. */
+		WRITE_ONCE(dhd->if_lifecycle_draining, true);
+#endif
 		if (!dhd_download_fw_on_driverload) {
 			DHD_STATLOG_CTRL(&dhd->pub, ST(WLAN_POWER_OFF), ifidx, 0);
 			if ((dhd->dhd_state & DHD_ATTACH_STATE_ADD_IF) &&
@@ -6622,6 +6717,23 @@ dhd_stop(struct net_device *net)
 				dhd_dump_pkt_clear(&dhd->pub);
 #endif /* DHD_PKTDUMP_ROAM */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				/* RTNL is owned; persistent static netdevs stay registered. */
+				for (i = 1; i < DHD_MAX_IFS; i++) {
+					struct net_device *vif = dhd->iflist[i] ?
+						dhd->iflist[i]->net : NULL;
+
+					if (!vif || vif->reg_state != NETREG_REGISTERED ||
+					    !(vif->flags & IFF_UP))
+						continue;
+#ifdef WL_STATIC_IF
+					if (IS_CFG80211_STATIC_IF(cfg, vif))
+						continue;
+#endif
+					dev_close(vif);
+				}
+				wiphy_lock(bcmcfg_to_wiphy(cfg));
+#endif
 				dhd_net_if_lock_local(dhd);
 				for (i = 1; i < DHD_MAX_IFS; i++)
 					dhd_remove_if(&dhd->pub, i, FALSE);
@@ -6650,6 +6762,9 @@ dhd_stop(struct net_device *net)
 				}
 #endif /* CONFIG_IPV6 && IPV6_NDO_SUPPORT */
 				dhd_net_if_unlock_local(dhd);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+				wiphy_unlock(bcmcfg_to_wiphy(cfg));
+#endif
 			}
 			cancel_work_sync(dhd->dhd_deferred_wq);
 
@@ -6742,6 +6857,9 @@ dhd_stop(struct net_device *net)
 
 	OLD_MOD_DEC_USE_COUNT;
 exit:
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	WRITE_ONCE(dhd->if_lifecycle_draining, false);
+#endif
 	if (skip_reset == false) {
 #if defined(WL_CFG80211)
 		if (ifidx == 0 && !dhd_download_fw_on_driverload) {
@@ -7562,7 +7680,7 @@ dhd_event_ifadd(dhd_info_t *dhdinfo, wl_event_data_if_t *ifevent, char *name, ui
 
 		memcpy(&if_event->event, ifevent, sizeof(if_event->event));
 		memcpy(if_event->mac, mac, ETHER_ADDR_LEN);
-		strlcpy(if_event->name, name, sizeof(if_event->name));
+		strscpy(if_event->name, name, sizeof(if_event->name));
 		dhd_deferred_schedule_work(dhdinfo->dhd_deferred_wq, (void *)if_event,
 			DHD_WQ_WORK_IF_ADD, dhd_ifadd_event_handler, DHD_WQ_WORK_PRIORITY_LOW);
 	}
@@ -7592,7 +7710,7 @@ dhd_event_ifdel(dhd_info_t *dhdinfo, wl_event_data_if_t *ifevent, char *name, ui
 	}
 	memcpy(&if_event->event, ifevent, sizeof(if_event->event));
 	memcpy(if_event->mac, mac, ETHER_ADDR_LEN);
-	strlcpy(if_event->name, name, sizeof(if_event->name));
+	strscpy(if_event->name, name, sizeof(if_event->name));
 	dhd_deferred_schedule_work(dhdinfo->dhd_deferred_wq, (void *)if_event, DHD_WQ_WORK_IF_DEL,
 		dhd_ifdel_event_handler, DHD_WQ_WORK_PRIORITY_LOW);
 
@@ -7790,6 +7908,9 @@ dhd_update_iflist_info(dhd_pub_t *dhdp, struct net_device *ndev, int ifidx,
 	/* For static if delete case, cleanup the if before ifidx update */
 	if ((if_state == NDEV_STATE_FW_IF_DELETED) ||
 		(if_state == NDEV_STATE_FW_IF_FAILED)) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		wl_cfg80211_quiesce_wiphy_events(ndev->ieee80211_ptr);
+#endif
 		dhd_cleanup_if(ifp->net);
 		dev_priv = DHD_DEV_PRIV(ndev);
 		dev_priv->ifidx = ifidx;
@@ -7842,6 +7963,15 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 
 	if (ifp != NULL) {
 		if (ifp->net != NULL) {
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			/* The outer owner must close before taking wiphy/private locks. */
+			if (ifp->net->reg_state == NETREG_REGISTERED &&
+			    (ifp->net->flags & IFF_UP)) {
+				DHD_ERROR(("%s: refusing live IF collision at ifidx:%d\n",
+					__FUNCTION__, ifidx));
+				return NULL;
+			}
+#endif
 			DHD_ERROR(("%s: free existing IF %s ifidx:%d \n",
 				__FUNCTION__, ifp->net->name, ifidx));
 
@@ -7854,6 +7984,9 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 				return NULL;
 			}
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			wl_cfg80211_quiesce_wiphy_events(ifp->net->ieee80211_ptr);
+#endif
 			dhd_dev_priv_clear(ifp->net); /* clear net_device private */
 
 			/* in unregister_netdev case, the interface gets freed by net->destructor
@@ -7912,7 +8045,7 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	dhd_dev_priv_save(ifp->net, dhdinfo, ifp, ifidx);
 
 	if (name && name[0]) {
-		strlcpy(ifp->net->name, name, IFNAMSIZ);
+		strscpy(ifp->net->name, name, IFNAMSIZ);
 	}
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 9))
@@ -7936,14 +8069,14 @@ dhd_allocate_if(dhd_pub_t *dhdpub, int ifidx, const char *name,
 	ifp->net->destructor = free_netdev;
 #endif /* WL_CFG80211 */
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 9) */
-	strlcpy(ifp->name, ifp->net->name, sizeof(ifp->name));
+	strscpy(ifp->name, ifp->net->name, sizeof(ifp->name));
 	dhdinfo->iflist[ifidx] = ifp;
 
 /* initialize the dongle provided if name */
 	if (dngl_name) {
-		strlcpy(ifp->dngl_name, dngl_name, sizeof(ifp->dngl_name));
+		strscpy(ifp->dngl_name, dngl_name, sizeof(ifp->dngl_name));
 	} else if (name) {
-		strlcpy(ifp->dngl_name, name, sizeof(ifp->dngl_name));
+		strscpy(ifp->dngl_name, name, sizeof(ifp->dngl_name));
 	}
 
 #ifdef PCIE_FULL_DONGLE
@@ -8003,10 +8136,33 @@ fail:
 
 void dhd_unregister_net(struct net_device *net, bool need_rtnl_lock)
 {
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy = net->ieee80211_ptr ? net->ieee80211_ptr->wiphy : NULL;
+
+	if (!wiphy) {
+		if (need_rtnl_lock)
+			unregister_netdev(net);
+		else
+			unregister_netdevice(net);
+		return;
+	}
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_quiesce_wiphy_events(net->ieee80211_ptr);
+#endif
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	if (need_rtnl_lock) {
 		rtnl_lock();
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		if (net->reg_state == NETREG_REGISTERED && (net->flags & IFF_UP))
+			dev_close(net);
+		wiphy_lock(wiphy);
+#endif
 		cfg80211_unregister_netdevice(net);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		wiphy_unlock(wiphy);
+#endif
 		rtnl_unlock();
 	} else {
 		cfg80211_unregister_netdevice(net);
@@ -8024,6 +8180,11 @@ void dhd_unregister_net(struct net_device *net, bool need_rtnl_lock)
 int dhd_register_net(struct net_device *net, bool need_rtnl_lock)
 {
 	int err = 0;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Plain monitor netdevs have no cfg80211 wireless_dev. */
+	if (!net->ieee80211_ptr)
+		return need_rtnl_lock ? register_netdev(net) : register_netdevice(net);
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	if (need_rtnl_lock) {
 		rtnl_lock();
@@ -8041,6 +8202,10 @@ int dhd_register_net(struct net_device *net, bool need_rtnl_lock)
 		err = register_netdevice(net);
 	}
 #endif /* KERNEL_VER >= KERNEL_VERSION(5, 15, 0) */
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (!err)
+		wl_cfg80211_resume_wiphy_events(net->ieee80211_ptr);
+#endif
 	return err;
 }
 
@@ -8116,6 +8281,11 @@ dhd_remove_if(dhd_pub_t *dhdpub, int ifidx, bool need_rtnl_lock)
 	ifp = dhdinfo->iflist[ifidx];
 
 	if (ifp != NULL) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		if (ifp->net)
+			wl_cfg80211_quiesce_wiphy_events(ifp->net->ieee80211_ptr);
+#endif
+
 #ifdef DHD_4WAYM4_FAIL_DISCONNECT
 		cancel_delayed_work_sync(&ifp->m4state_work);
 #endif /* DHD_4WAYM4_FAIL_DISCONNECT */
@@ -9158,7 +9328,7 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	if (iface_name[0]) {
 		int len;
 		char ch;
-		strlcpy(if_name, iface_name, sizeof(if_name));
+		strscpy(if_name, iface_name, sizeof(if_name));
 		len = strlen(if_name);
 		ch = if_name[len - 1];
 		if ((ch > '9' || ch < '0') && (len < IFNAMSIZ - 2)) {
@@ -9868,7 +10038,7 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 			DHD_ERROR(("fw path len exceeds max len of dhdinfo->fw_path\n"));
 			return FALSE;
 		}
-		strlcpy(dhdinfo->fw_path, fw, fw_path_len);
+		strscpy(dhdinfo->fw_path, fw, fw_path_len);
 	}
 	if (nv && nv[0] != '\0') {
 		nv_len = strlen(nv);
@@ -9877,7 +10047,7 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 			return FALSE;
 		}
 		memset(dhdinfo->nv_path, 0, nv_path_len);
-		strlcpy(dhdinfo->nv_path, nv, nv_path_len);
+		strscpy(dhdinfo->nv_path, nv, nv_path_len);
 #ifdef DHD_USE_SINGLE_NVRAM_FILE
 		/* Remove "_net" or "_mfg" tag from current nvram path */
 		{
@@ -9912,7 +10082,7 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 			DHD_ERROR(("signature path len exceeds max len of dhdinfo->sig_path\n"));
 			return FALSE;
 		}
-		strlcpy(dhdinfo->sig_path, signature_path, sig_path_len);
+		strscpy(dhdinfo->sig_path, signature_path, sig_path_len);
 	}
 
 #ifdef DHD_UCODE_DOWNLOAD
@@ -9922,7 +10092,7 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 			DHD_ERROR(("uc path len exceeds max len of dhdinfo->uc_path\n"));
 			return FALSE;
 		}
-		strlcpy(dhdinfo->uc_path, uc, sizeof(dhdinfo->uc_path));
+		strscpy(dhdinfo->uc_path, uc, sizeof(dhdinfo->uc_path));
 	}
 #endif /* DHD_UCODE_DOWNLOAD */
 
@@ -9993,7 +10163,7 @@ extern bool dhd_update_btfw_path(dhd_info_t *dhdinfo, char* btfw_path)
 			DHD_ERROR(("fw path len exceeds max len of dhdinfo->btfw_path\n"));
 			return FALSE;
 		}
-		strlcpy(dhdinfo->btfw_path, fw, sizeof(dhdinfo->btfw_path));
+		strscpy(dhdinfo->btfw_path, fw, sizeof(dhdinfo->btfw_path));
 	}
 
 	/* clear the path in module parameter */
@@ -11201,8 +11371,8 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 
 #if defined(CUSTOM_COUNTRY_CODE_XZ)
 	/* Set initial country code to XZ */
-	strlcpy(dhd->dhd_cspec.country_abbrev, "XZ", WLC_CNTRY_BUF_SZ);
-	strlcpy(dhd->dhd_cspec.ccode, "XZ", WLC_CNTRY_BUF_SZ);
+	strscpy(dhd->dhd_cspec.country_abbrev, "XZ", WLC_CNTRY_BUF_SZ);
+	strscpy(dhd->dhd_cspec.ccode, "XZ", WLC_CNTRY_BUF_SZ);
 	DHD_ERROR(("%s: Set initial country code to XZ(World Wide Safe)\n", __FUNCTION__));
 #endif /* CUSTOM_COUNTRY_CODE_XZ */
 	/* Set Country code  */
@@ -11455,7 +11625,7 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 				DHD_ERROR(("Couldn't find New line character\n"));
 			} else {
 				bzero(clm_version, CLM_VER_STR_LEN);
-				strlcpy(clm_version, ver_temp_buf,
+				strscpy(clm_version, ver_temp_buf,
 					MIN(strlen(ver_temp_buf) + 1, CLM_VER_STR_LEN));
 				DHD_INFO(("CLM version = %s\n", clm_version));
 			}
@@ -12277,8 +12447,8 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 
 #if defined(CUSTOM_COUNTRY_CODE_XZ)
 	/* Set initial country code to XZ */
-	strlcpy(dhd->dhd_cspec.country_abbrev, "XZ", WLC_CNTRY_BUF_SZ);
-	strlcpy(dhd->dhd_cspec.ccode, "XZ", WLC_CNTRY_BUF_SZ);
+	strscpy(dhd->dhd_cspec.country_abbrev, "XZ", WLC_CNTRY_BUF_SZ);
+	strscpy(dhd->dhd_cspec.ccode, "XZ", WLC_CNTRY_BUF_SZ);
 	DHD_ERROR(("%s: Set initial country code to XZ(World Wide Safe)\n", __FUNCTION__));
 #endif /* CUSTOM_COUNTRY_CODE_XZ */
 	/* Set Country code  */
@@ -13049,7 +13219,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 				DHD_ERROR(("Couldn't find New line character\n"));
 			} else {
 				bzero(clm_version, CLM_VER_STR_LEN);
-				strlcpy(clm_version, ver_temp_buf,
+				strscpy(clm_version, ver_temp_buf,
 					MIN(strlen(ver_temp_buf) + 1, CLM_VER_STR_LEN));
 				DHD_INFO(("CLM version = %s\n", clm_version));
 			}
@@ -14143,6 +14313,10 @@ void dhd_detach(dhd_pub_t *dhdp)
 	unsigned long flags;
 	int timer_valid = FALSE;
 	dhd_if_t *ifp;
+	bool need_rtnl_lock = true;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *detach_wiphy = NULL;
+#endif
 #ifdef WL_CFG80211
 	struct bcm_cfg80211 *cfg = NULL;
 #endif
@@ -14152,6 +14326,20 @@ void dhd_detach(dhd_pub_t *dhdp)
 	dhd = (dhd_info_t *)dhdp->info;
 	if (!dhd)
 		return;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Bus removal/attach rollback enters without RTNL or private mutexes. */
+	WRITE_ONCE(dhd->if_lifecycle_stopping, true);
+	if (dhd->dhd_state & DHD_ATTACH_STATE_CFG80211) {
+#ifdef WL_NAN
+		if (dhd->iflist[0] && dhd->iflist[0]->net &&
+		    dhd->iflist[0]->net->ieee80211_ptr)
+			wl_cfgnan_quiesce_disable(wl_get_cfg(dhd->iflist[0]->net));
+#endif
+		/* Drain a lifecycle transition that passed admission before stop. */
+		rtnl_lock();
+		rtnl_unlock();
+	}
+#endif
 
 	/* primary interface 0 */
 	ifp = dhd->iflist[0];
@@ -14243,11 +14431,30 @@ void dhd_detach(dhd_pub_t *dhdp)
 	if (dhd->dhd_state & DHD_ATTACH_STATE_ADD_IF) {
 		int i = 1;
 
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		/* Close first: ndo_stop may acquire private locks and enter cfg80211. */
+		rtnl_lock();
+		if (ifp && ifp->net && ifp->net->ieee80211_ptr) {
+			detach_wiphy = ifp->net->ieee80211_ptr->wiphy;
+			for (i = 0; i < ARRAY_SIZE(dhd->iflist); i++) {
+				struct net_device *net = dhd->iflist[i] ?
+					dhd->iflist[i]->net : NULL;
+
+				if (net && net->reg_state == NETREG_REGISTERED &&
+				    (net->flags & IFF_UP))
+					dev_close(net);
+			}
+			wiphy_lock(detach_wiphy);
+			need_rtnl_lock = false;
+		} else {
+			rtnl_unlock();
+		}
+#endif
 		/* Cleanup virtual interfaces */
 		dhd_net_if_lock_local(dhd);
 		for (i = 1; i < DHD_MAX_IFS; i++) {
 			if (dhd->iflist[i]) {
-				dhd_remove_if(&dhd->pub, i, TRUE);
+				dhd_remove_if(&dhd->pub, i, need_rtnl_lock);
 			}
 		}
 		dhd_net_if_unlock_local(dhd);
@@ -14269,7 +14476,7 @@ void dhd_detach(dhd_pub_t *dhdp)
 				free_netdev(ifp->net);
 			} else {
 				netif_tx_disable(ifp->net);
-				dhd_unregister_net(ifp->net, true);
+				dhd_unregister_net(ifp->net, need_rtnl_lock);
 			}
 #ifdef PCIE_FULL_DONGLE
 			ifp->net = DHD_NET_DEV_NULL;
@@ -14303,6 +14510,13 @@ void dhd_detach(dhd_pub_t *dhdp)
 #endif
 		}
 	}
+
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	if (detach_wiphy) {
+		wiphy_unlock(detach_wiphy);
+		rtnl_unlock();
+	}
+#endif
 
 	/* Clear the watchdog timer */
 	DHD_GENERAL_LOCK(&dhd->pub, flags);
@@ -14806,11 +15020,11 @@ _dhd_module_init(void)
 #endif /* BCM_ROUTER_DHD */
 
 	if (firmware_path[0] != '\0') {
-		strlcpy(fw_bak_path, firmware_path, sizeof(fw_bak_path));
+		strscpy(fw_bak_path, firmware_path, sizeof(fw_bak_path));
 	}
 
 	if (nvram_path[0] != '\0') {
-		strlcpy(nv_bak_path, nvram_path, sizeof(nv_bak_path));
+		strscpy(nv_bak_path, nvram_path, sizeof(nv_bak_path));
 	}
 
 	do {
@@ -14833,8 +15047,8 @@ _dhd_module_init(void)
 #endif /* CONFIG_ARCH_WAIPIO || CONFIG_SOC_S5E9925 */
 			DHD_ERROR(("%s: Failed to load the driver, try cnt %d\n",
 				__FUNCTION__, retry));
-			strlcpy(firmware_path, fw_bak_path, sizeof(firmware_path));
-			strlcpy(nvram_path, nv_bak_path, sizeof(nvram_path));
+			strscpy(firmware_path, fw_bak_path, sizeof(firmware_path));
+			strscpy(nvram_path, nv_bak_path, sizeof(nvram_path));
 		}
 	} while (retry--);
 
@@ -17716,9 +17930,9 @@ void dhd_get_customized_country_code(struct net_device *dev, char *country_iso_c
 		 */
 		if ((strncmp(country_iso_code, "", WLC_CNTRY_BUF_SZ) == 0) ||
 				(strncmp(country_iso_code, "00", WLC_CNTRY_BUF_SZ) == 0)) {
-			strlcpy(country_iso_code, "XZ", WLC_CNTRY_BUF_SZ);
-			strlcpy(cspec->country_abbrev, country_iso_code, WLC_CNTRY_BUF_SZ);
-			strlcpy(cspec->ccode, country_iso_code, WLC_CNTRY_BUF_SZ);
+			strscpy(country_iso_code, "XZ", WLC_CNTRY_BUF_SZ);
+			strscpy(cspec->country_abbrev, country_iso_code, WLC_CNTRY_BUF_SZ);
+			strscpy(cspec->ccode, country_iso_code, WLC_CNTRY_BUF_SZ);
 			DHD_ERROR(("%s: ccode change to %s\n", __FUNCTION__, country_iso_code));
 		}
 	}
@@ -17780,7 +17994,7 @@ int dhd_net_set_fw_path(struct net_device *dev, char *fw)
 	if (!fw || fw[0] == '\0')
 		return -EINVAL;
 
-	strlcpy(dhd->fw_path, fw, sizeof(dhd->fw_path));
+	strscpy(dhd->fw_path, fw, sizeof(dhd->fw_path));
 
 #if defined(SOFTAP)
 	if (strstr(fw, "apsta") != NULL) {
@@ -20465,9 +20679,9 @@ dhd_os_get_version(struct net_device *dev, bool dhd_ver, char **buf, uint32 size
 
 	bzero(*buf, size);
 	if (dhd_ver) {
-		strlcpy(*buf, dhd_version, size);
+		strscpy(*buf, dhd_version, size);
 	} else {
-		strlcpy(*buf, fw_str, size);
+		strscpy(*buf, fw_str, size);
 	}
 	return BCME_OK;
 }
@@ -21939,7 +22153,11 @@ dhd_print_kirqstats(dhd_pub_t *dhd, unsigned int irq_num)
 	bcm_bprintf(&strbuf, "dhd irq %u:", irq_num);
 	for_each_online_cpu(i)
 		bcm_bprintf(&strbuf, "%10u ",
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			irq_desc_kstat_cpu(desc, i));
+#else
 			desc->kstat_irqs ? *per_cpu_ptr(desc->kstat_irqs, i) : 0);
+#endif
 	if (desc->irq_data.chip) {
 		if (desc->irq_data.chip->name)
 			bcm_bprintf(&strbuf, " %8s", desc->irq_data.chip->name);

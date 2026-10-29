@@ -26,6 +26,7 @@
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/skbuff.h>
+#include <linux/skbuff_ref.h>
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <qdf_atomic.h>

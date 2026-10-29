@@ -351,7 +351,7 @@ static const struct ieee_80211_mcs_rate_info wl_mcs_info[] = {
  * Returns the rate in [Kbps] units for a caller supplied MCS/bandwidth/Nss/Sgi combination.
  *     'mcs' : a *single* spatial stream MCS (11n or 11ac)
  */
-uint
+static uint
 rate_mcs2rate(uint mcs, uint nss, uint bw, int sgi)
 {
 	const int ksps = 250; /* kilo symbols per sec, 4 us sym */
@@ -468,7 +468,7 @@ ftm_intvl2nsec(const wl_proxd_intvl_t *intvl)
 	}
 	return ret;
 }
-uint64
+static uint64
 ftm_intvl2usec(const wl_proxd_intvl_t *intvl)
 {
 	uint64 ret;
@@ -1649,7 +1649,7 @@ dhd_rtt_set_next_target_idx(dhd_pub_t *dhd, int start_idx)
 	return (int8)rtt_status->cur_idx;
 }
 
-void
+static void
 dhd_rtt_set_target_list_mode(dhd_pub_t *dhd)
 {
 	int8 idx;
@@ -2295,7 +2295,7 @@ dhd_rtt_set_geofence_setup_status(dhd_pub_t *dhd, bool inprog,
 	}
 }
 
-int
+static int
 dhd_rtt_sched_geofencing_target(dhd_pub_t *dhd)
 {
 	rtt_geofence_target_info_t  *geofence_target_info;

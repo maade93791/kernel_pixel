@@ -538,7 +538,7 @@ dhd_dump_pkt_clear(dhd_pub_t *dhdp)
 	bzero(&pktcnts->dns_cnt, sizeof(pkt_cnt_t));
 }
 
-bool
+static bool
 dhd_dump_pkt_enabled(dhd_pub_t *dhdp)
 {
 	pkt_cnts_log_t *pktcnts;
@@ -554,8 +554,9 @@ dhd_dump_pkt_enabled(dhd_pub_t *dhdp)
 #else
 static INLINE void
 dhd_dump_pkt_cnts_inc(dhd_pub_t *dhdp, bool tx, uint16 *pktfate, uint16 pkttype) { }
-static INLINE bool
-dhd_dump_pkt_enabled(dhd_pub_t *dhdp) { return FALSE; }
+static INLINE static bool
+dhd_dump_pkt_enabled(dhd_pub_t *dhdp)
+{ return FALSE; }
 #endif /* DHD_PKTDUMP_ROAM */
 
 #ifdef DHD_8021X_DUMP
@@ -1357,8 +1358,9 @@ uint32 *pkthash, uint16 *pktfate)
 	return;
 }
 
-char*
-icmpv6_types(uint8 type) {
+static char *
+icmpv6_types(uint8 type)
+{
 	switch(type) {
 		case ICMPV6_PKT_TYPE_ECHO_REQ:
 			return "Echo Request";

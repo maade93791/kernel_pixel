@@ -22,6 +22,7 @@
  */
 
 #ifdef WL_NAN
+#include <linux/sched/clock.h>
 #include <bcmutils.h>
 #include <bcmendian.h>
 #include <bcmwifi_channels.h>
@@ -364,7 +365,7 @@ wl_cfgnan_remove_inst_id(struct bcm_cfg80211 *cfg, uint8 inst_id)
 	clrbit(cfg->nancfg->svc_inst_id_mask, inst_id-1);
 	return ret;
 }
-s32 wl_cfgnan_parse_sdea_data(osl_t *osh, const uint8 *p_attr,
+static s32 wl_cfgnan_parse_sdea_data(osl_t *osh, const uint8 *p_attr,
 		uint16 len, nan_event_data_t *tlv_data)
 {
 	const wifi_nan_svc_desc_ext_attr_t *nan_svc_desc_ext_attr = NULL;
@@ -452,7 +453,7 @@ fail:
  * This attribute contains some mandatory fields and some optional fields
  * depending on the content of the service discovery request.
  */
-s32
+static s32
 wl_cfgnan_parse_sda_data(osl_t *osh, const uint8 *p_attr,
 		uint16 len, nan_event_data_t *tlv_data)
 {
@@ -1041,7 +1042,7 @@ fail:
 	return ret;
 }
 
-int
+static int
 wl_cfg_nan_check_cmd_len(uint16 nan_iov_len, uint16 data_size,
 		uint16 *subcmd_len)
 {
@@ -1062,7 +1063,7 @@ wl_cfg_nan_check_cmd_len(uint16 nan_iov_len, uint16 data_size,
 	return ret;
 }
 
-int
+static int
 wl_cfgnan_config_eventmask(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 	uint8 event_ind_flag, bool disable_events)
 {
@@ -2868,45 +2869,102 @@ fail:
 	return ret;
 }
 
+/* Called with nan_disable_lock held; wake operations are atomic. */
+static void
+wl_cfgnan_disable_wake_unlock(wl_nancfg_t *nancfg)
+{
+	if (nancfg->nan_disable_wake_held) {
+		DHD_NAN_WAKE_UNLOCK(nancfg->cfg->pub);
+		nancfg->nan_disable_wake_held = false;
+	}
+}
+
+/*
+ * The work item dispatches the desired request, rather than carrying an
+ * invocation's mutable generation. A stale trigger must honor the current
+ * request's absolute deadline before doing any firmware or interface work.
+ */
 void
+wl_cfgnan_schedule_disable(struct bcm_cfg80211 *cfg, uint32 delay_ms)
+{
+	wl_nancfg_t *nancfg = cfg->nancfg;
+	unsigned long flags, delay, now;
+
+	spin_lock_irqsave(&nancfg->nan_disable_lock, flags);
+	if (nancfg->nan_disable_stopping)
+		goto out;
+
+	/* Preserve schedule_delayed_work()'s first-pending-request deadline. */
+	if (!nancfg->nan_disable_pending) {
+		nancfg->nan_disable_pending = true;
+		nancfg->nan_disable_deadline = jiffies + msecs_to_jiffies(delay_ms);
+	}
+	if (delay_ms) {
+		DHD_NAN_WAKE_LOCK_TIMEOUT(cfg->pub, NAN_WAKELOCK_TIMEOUT);
+		nancfg->nan_disable_wake_held = true;
+	}
+	now = jiffies;
+	delay = time_before(now, nancfg->nan_disable_deadline) ?
+		nancfg->nan_disable_deadline - now : 0;
+	mod_delayed_work(system_wq, &nancfg->nan_disable, delay);
+out:
+	spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
+}
+
+static bool
+wl_cfgnan_cancel_disable(struct bcm_cfg80211 *cfg, bool stopping)
+{
+	wl_nancfg_t *nancfg = cfg->nancfg;
+	unsigned long flags;
+	bool pending;
+
+	spin_lock_irqsave(&nancfg->nan_disable_lock, flags);
+	pending = nancfg->nan_disable_pending;
+	nancfg->nan_disable_pending = false;
+	if (stopping)
+		nancfg->nan_disable_stopping = true;
+	/* Never join a callback waiting for the caller's native lifecycle locks. */
+	cancel_delayed_work(&nancfg->nan_disable);
+	wl_cfgnan_disable_wake_unlock(nancfg);
+	spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
+	return pending;
+}
+
+/* Must run before cfg teardown, outside native and private lifecycle locks. */
+void
+wl_cfgnan_quiesce_disable(struct bcm_cfg80211 *cfg)
+{
+	if (!cfg || !cfg->nancfg)
+		return;
+	wl_cfgnan_cancel_disable(cfg, true);
+	cancel_delayed_work_sync(&cfg->nancfg->nan_disable);
+}
+
+static void
 wl_cfgnan_immediate_nan_disable_pending(struct bcm_cfg80211 *cfg)
 {
-	if (delayed_work_pending(&cfg->nancfg->nan_disable)) {
+	wl_nancfg_t *nancfg = cfg->nancfg;
+	unsigned long flags;
+
+	spin_lock_irqsave(&nancfg->nan_disable_lock, flags);
+	if (nancfg->nan_disable_pending && !nancfg->nan_disable_stopping) {
 		WL_DBG(("Do immediate nan_disable work\n"));
-		DHD_NAN_WAKE_UNLOCK(cfg->pub);
-		if (cancel_delayed_work(&cfg->nancfg->nan_disable)) {
-			schedule_delayed_work(&cfg->nancfg->nan_disable, 0);
-		}
+		nancfg->nan_disable_deadline = jiffies;
+		wl_cfgnan_disable_wake_unlock(nancfg);
+		mod_delayed_work(system_wq, &nancfg->nan_disable, 0);
 	}
+	spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
 }
 
 int
 wl_cfgnan_check_nan_disable_pending(struct bcm_cfg80211 *cfg,
-	bool force_disable, bool is_sync_reqd)
+	bool force_disable)
 {
 	int ret = BCME_OK;
 	struct net_device *ndev = NULL;
 
-	if (delayed_work_pending(&cfg->nancfg->nan_disable)) {
-		WL_DBG(("Cancel nan_disable work\n"));
-		/*
-		 * Nan gets disabled from dhd_stop(dev_close) and other frameworks contexts.
-		 * Can't use cancel_work_sync from dhd_stop context for
-		 * wl_cfgnan_delayed_disable since both contexts uses
-		 * rtnl_lock resulting in deadlock. If dhd_stop gets invoked,
-		 * rely on dhd_stop context to do the nan clean up work and
-		 * just do return from delayed WQ based on state check.
-		 */
-
-		DHD_NAN_WAKE_UNLOCK(cfg->pub);
-
-		if (is_sync_reqd == true) {
-			cancel_delayed_work_sync(&cfg->nancfg->nan_disable);
-		} else {
-			cancel_delayed_work(&cfg->nancfg->nan_disable);
-		}
+	if (wl_cfgnan_cancel_disable(cfg, false))
 		force_disable = true;
-	}
 	if ((force_disable == true) && (cfg->nancfg->nan_enable == true)) {
 		ret = wl_cfgnan_disable(cfg);
 		if (ret != BCME_OK) {
@@ -3034,11 +3092,22 @@ wl_cfgnan_start_handler(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 	NAN_MUTEX_LOCK();
 
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN_NMI)) != BCME_OK) {
+	NAN_MUTEX_UNLOCK();
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN_NMI);
+	mutex_lock(&cfg->if_sync);
+	NAN_MUTEX_LOCK();
+	if (ret != BCME_OK) {
 		WL_ERR(("Conflicting iface is present, cant support nan\n"));
 		NAN_MUTEX_UNLOCK();
 		mutex_unlock(&cfg->if_sync);
 		goto fail;
+	}
+	if (!dhdp->up) {
+		WL_ERR(("bus stopped during interface policy\n"));
+		NAN_MUTEX_UNLOCK();
+		mutex_unlock(&cfg->if_sync);
+		return BCME_ERROR;
 	}
 #endif /* WL_IFACE_MGMT */
 
@@ -3443,12 +3512,10 @@ wl_cfgnan_start_handler(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 
 fail:
 	if (unlikely(ret) || unlikely(cmd_data->status)) {
-		mutex_lock(&cfg->if_sync);
 		ret = wl_cfg80211_delete_iface(cfg, WL_IF_TYPE_NAN);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to delete NDI[%d]\n", ret));
 		}
-		mutex_unlock(&cfg->if_sync);
 		if (delayed_work_pending(&cfg->nancfg->nan_nmi_rand)) {
 			cancel_delayed_work_sync(&cfg->nancfg->nan_nmi_rand);
 		}
@@ -3508,6 +3575,7 @@ wl_cfgnan_disable(struct bcm_cfg80211 *cfg)
 			WL_ERR(("failed to delete NDI[%d]\n", ret));
 		}
 
+		mutex_lock(&cfg->if_sync);
 		ret = wl_cfgnan_stop_handler(ndev, cfg);
 		if (ret == -ENODEV) {
 			WL_ERR(("Bus is down, no need to proceed\n"));
@@ -3522,6 +3590,7 @@ wl_cfgnan_disable(struct bcm_cfg80211 *cfg)
 			}
 		}
 		wl_cfgnan_disable_cleanup(cfg);
+		mutex_unlock(&cfg->if_sync);
 	}
 	NAN_DBG_EXIT();
 	return ret;
@@ -3623,27 +3692,44 @@ wl_cfgnan_disable_cleanup(struct bcm_cfg80211 *cfg)
 void
 wl_cfgnan_delayed_disable(struct work_struct *work)
 {
-	struct bcm_cfg80211 *cfg = NULL;
-	struct net_device *ndev = NULL;
-	wl_nancfg_t *nancfg = NULL;
+	struct bcm_cfg80211 *cfg;
+	struct net_device *ndev;
+	wl_nancfg_t *nancfg;
+	unsigned long flags, now;
 
 	BCM_SET_CONTAINER_OF(nancfg, work, wl_nancfg_t, nan_disable.work);
-
 	cfg = nancfg->cfg;
 
 	rtnl_lock();
-	if (nancfg->nan_enable == true) {
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
+	spin_lock_irqsave(&nancfg->nan_disable_lock, flags);
+	if (!nancfg->nan_disable_pending || nancfg->nan_disable_stopping) {
+		spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
+		goto out;
+	}
+	now = jiffies;
+	if (time_before(now, nancfg->nan_disable_deadline)) {
+		mod_delayed_work(system_wq, &nancfg->nan_disable,
+				nancfg->nan_disable_deadline - now);
+		spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
+		goto out;
+	}
+	nancfg->nan_disable_pending = false;
+	spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
+
+	if (nancfg->nan_enable) {
 		wl_cfgnan_disable(cfg);
 		ndev = bcmcfg_to_prmry_ndev(cfg);
 		wl_cfgvendor_nan_send_async_disable_resp(ndev->ieee80211_ptr);
 	} else {
 		WL_INFORM_MEM(("nan is in disabled state\n"));
 	}
-
-	DHD_NAN_WAKE_UNLOCK(cfg->pub);
+	spin_lock_irqsave(&nancfg->nan_disable_lock, flags);
+	wl_cfgnan_disable_wake_unlock(nancfg);
+	spin_unlock_irqrestore(&nancfg->nan_disable_lock, flags);
+out:
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
 	rtnl_unlock();
-
-	return;
 }
 
 int
@@ -4146,7 +4232,7 @@ wl_cfgnan_check_for_ranging(struct bcm_cfg80211 *cfg, struct ether_addr *peer)
 	return NULL;
 }
 
-nan_ranging_inst_t *
+static nan_ranging_inst_t *
 wl_cfgnan_get_rng_inst_by_id(struct bcm_cfg80211 *cfg, uint8 rng_id)
 {
 	uint8 i;
@@ -4718,7 +4804,6 @@ wl_cfgnan_suspend_all_geofence_rng_sessions(struct net_device *ndev,
 	WL_INFORM_MEM(("Suspending all geofence sessions: "
 		"suspend_reason = %d\n", suspend_reason));
 
-	cancel_flags |= NAN_RNG_TERM_FLAG_IMMEDIATE;
 	for (i = 0; i < NAN_MAX_RANGING_INST; i++) {
 		ranging_inst = &cfg->nancfg->nan_ranging_info[i];
 		/* Cancel Ranging if in progress for rang_inst */
@@ -5860,7 +5945,7 @@ wl_cfgnan_aligned_data_size_of_opt_dp_params(struct bcm_cfg80211 *cfg, uint16 *d
 	*data_size += ALIGN_SIZE(WL_NAN_SVC_HASH_LEN + NAN_XTLV_ID_LEN_SIZE, 4);
 	return ret;
 }
-int
+static int
 wl_cfgnan_svc_get_handler(struct net_device *ndev,
 	struct bcm_cfg80211 *cfg, uint16 cmd_id, nan_discover_cmd_data_t *cmd_data)
 {
@@ -5936,7 +6021,7 @@ fail:
 
 }
 
-int
+static int
 wl_cfgnan_svc_handler(struct net_device *ndev,
 	struct bcm_cfg80211 *cfg, uint16 cmd_id, nan_discover_cmd_data_t *cmd_data)
 {
@@ -6887,7 +6972,7 @@ wl_cfgnan_data_path_iface_create_delete_handler(struct net_device *ndev,
 				WL_ERR(("Couldn't get mac addr for NDI ret %d\n", ret));
 				goto fail;
 			}
-			wdev = wl_cfg80211_add_if(cfg, ndev, WL_IF_TYPE_NAN,
+			wdev = wl_cfg80211_add_if_locked(cfg, ndev, WL_IF_TYPE_NAN,
 				ifname, mac_addr);
 			if (!wdev) {
 				ret = -ENODEV;
@@ -6899,7 +6984,7 @@ wl_cfgnan_data_path_iface_create_delete_handler(struct net_device *ndev,
 			 */
 			wl_cfgnan_add_ndi_data(cfg, idx, ifname, wdev);
 		} else if (type == NAN_WIFI_SUBCMD_DATA_PATH_IFACE_DELETE) {
-			ret = wl_cfg80211_del_if(cfg, ndev, NULL, ifname);
+			ret = wl_cfg80211_del_if_locked(cfg, ndev, NULL, ifname);
 			if (ret == BCME_OK) {
 				/* handled the post del ndi ops in _wl_cfg80211_del_if */
 			} else if (ret == -ENODEV) {
@@ -6993,7 +7078,7 @@ end:
 }
 
 /* Adds peer to nan data peer list */
-void
+static void
 wl_cfgnan_data_add_peer(struct bcm_cfg80211 *cfg,
 		struct ether_addr *peer_addr)
 {
@@ -7080,9 +7165,20 @@ wl_cfgnan_data_path_request_handler(struct net_device *ndev,
 	mutex_lock(&cfg->if_sync);
 	NAN_MUTEX_LOCK();
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN)) < 0) {
+	NAN_MUTEX_UNLOCK();
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN);
+	mutex_lock(&cfg->if_sync);
+	NAN_MUTEX_LOCK();
+	if (ret < 0) {
 		WL_ERR(("Conflicting iface found to be active\n"));
 		ret = BCME_UNSUPPORTED;
+		goto fail;
+	}
+	if (!wl_get_drv_status(cfg, READY, bcmcfg_to_prmry_ndev(cfg)) ||
+	    !cfg->nancfg->nan_init_state || !cfg->nancfg->nan_enable) {
+		WL_ERR(("NAN stopped during interface policy\n"));
+		ret = BCME_NOTREADY;
 		goto fail;
 	}
 #endif /* WL_IFACE_MGMT */
@@ -7361,9 +7457,20 @@ wl_cfgnan_data_path_response_handler(struct net_device *ndev,
 	mutex_lock(&cfg->if_sync);
 	NAN_MUTEX_LOCK();
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN)) < 0) {
+	NAN_MUTEX_UNLOCK();
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_NAN);
+	mutex_lock(&cfg->if_sync);
+	NAN_MUTEX_LOCK();
+	if (ret < 0) {
 		WL_ERR(("Conflicting iface found to be active\n"));
 		ret = BCME_UNSUPPORTED;
+		goto fail;
+	}
+	if (!wl_get_drv_status(cfg, READY, bcmcfg_to_prmry_ndev(cfg)) ||
+	    !cfg->nancfg->nan_init_state || !cfg->nancfg->nan_enable) {
+		WL_ERR(("NAN stopped during interface policy\n"));
+		ret = BCME_NOTREADY;
 		goto fail;
 	}
 #endif /* WL_IFACE_MGMT */
@@ -9706,7 +9813,7 @@ fail:
 	return ret;
 }
 
-s32
+static s32
 wl_nan_print_avail_stats(const uint8 *data)
 {
 	int idx;
@@ -9896,7 +10003,7 @@ static const struct net_device_ops wl_cfgnan_nmi_if_ops = {
 	.ndo_start_xmit = wl_cfgnan_nmi_start_xmit,
 };
 
-s32
+static s32
 wl_cfgnan_register_nmi_ndev(struct bcm_cfg80211 *cfg)
 {
 	int ret = 0;
@@ -10013,6 +10120,8 @@ wl_cfgnan_attach(struct bcm_cfg80211 *cfg)
 	}
 
 	nancfg = cfg->nancfg;
+	spin_lock_init(&nancfg->nan_disable_lock);
+	INIT_DELAYED_WORK(&nancfg->nan_disable, wl_cfgnan_delayed_disable);
 #ifdef WL_NMI_IF
 	if (wl_cfgnan_register_nmi_ndev(cfg) < 0) {
 		WL_ERR(("NAN NMI ndev reg failed in attach \n"));
@@ -10021,7 +10130,6 @@ wl_cfgnan_attach(struct bcm_cfg80211 *cfg)
 #endif /* WL_NMI_IF */
 	mutex_init(&nancfg->nan_sync);
 	init_waitqueue_head(&nancfg->nan_event_wait);
-	INIT_DELAYED_WORK(&nancfg->nan_disable, wl_cfgnan_delayed_disable);
 	INIT_DELAYED_WORK(&nancfg->nan_nmi_rand, wl_cfgnan_periodic_nmi_rand_addr);
 	nancfg->nan_dp_state = NAN_DP_STATE_DISABLED;
 	init_waitqueue_head(&nancfg->ndp_if_change_event);
@@ -10035,11 +10143,7 @@ void
 wl_cfgnan_detach(struct bcm_cfg80211 *cfg)
 {
 	if (cfg && cfg->nancfg) {
-		if (delayed_work_pending(&cfg->nancfg->nan_disable)) {
-			WL_DBG(("Cancel nan_disable work\n"));
-			DHD_NAN_WAKE_UNLOCK(cfg->pub);
-			cancel_delayed_work_sync(&cfg->nancfg->nan_disable);
-		}
+		wl_cfgnan_quiesce_disable(cfg);
 		if (delayed_work_pending(&cfg->nancfg->nan_nmi_rand)) {
 			WL_DBG(("Cancel nan_nmi_rand workq\n"));
 			cancel_delayed_work_sync(&cfg->nancfg->nan_nmi_rand);

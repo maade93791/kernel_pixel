@@ -526,8 +526,56 @@ void dhd_alert_process(struct work_struct *work_data);
 #endif /* WL_CFGVENDOR_SEND_ALERT_EVENT */
 #if defined(SUPPORT_MULTIPLE_NVRAM) || defined(SUPPORT_MULTIPLE_CLMBLOB)
 int dhd_get_platform_naming_for_nvram_clmblob_file(char* file_name);
-#ifdef USE_CID_CHECK
-void dhd_set_platform_ext_name_for_chip_version(char* chip_version);
-#endif /* USE_CID_CHECK */
+void dhd_set_platform_ext_name_for_chip_version(char *chip_version);
 #endif /* SUPPORT_MULTIPLE_NVRAM || SUPPORT_MULTIPLE_CLMBLOB */
+/* Linux host entrypoints shared with common, cfg80211 and platform consumers. */
+bool dhd_is_static_ndev(dhd_pub_t *dhdp, struct net_device *ndev);
+int dhd_dev_init_ioctl(struct net_device *dev);
+int dhd_ioctl_entry_local(struct net_device *net, wl_ioctl_t *ioc, int cmd);
+int net_os_wake_lock_rx_timeout_enable(struct net_device *dev, int val);
+int net_os_wake_lock_ctrl_timeout_enable(struct net_device *dev, int val);
+#if defined(OEM_ANDROID) && defined(CONFIG_ARCH_EXYNOS) && defined(BCMPCIE)
+void dhd_host_recover_link(void);
+#endif
+#if defined(WL_MONITOR) && defined(BCMPCIE)
+void dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx);
+#endif
+
+int dhd_get_monitor_data(dhd_pub_t *dhdp, void *pktbuf, struct sk_buff *skb, void *pktdata,
+	uint pktlen);
+
+uint8 *dhd_bssidx2bssid(dhd_pub_t *dhdp, int idx);
+
+int32 dhd_role_to_nl80211_iftype(int32 role);
+
+int dhd_sendup(dhd_pub_t *dhdp, int ifidx, void *p);
+
+void dhd_dpc_enable(dhd_pub_t *dhdp);
+
+void dhd_dpc_kill(dhd_pub_t *dhdp);
+
+void dhd_dpc_tasklet_kill(dhd_pub_t *dhdp);
+
+int _dhd_set_mac_address(struct dhd_info *dhd, int ifidx, uint8 *addr);
+
+netdev_tx_t dhd_start_xmit(struct sk_buff *skb, struct net_device *net);
+
+#if defined(DBG_PKT_MON) && defined(PCIE_FULL_DONGLE)
+void dhd_80211_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t *msg, void *pkt, int ifidx);
+#endif
+
+#if defined(WL_MONITOR)
+bool dhd_monitor_enabled(dhd_pub_t *dhd, int ifidx);
+#endif
+
+int dhd_wlan_power(int onoff);
+
+int dhd_get_wlan_oob_gpio(void);
+
+int dhd_get_wlan_oob_gpio_number(void);
+
+int dhd_wlan_init(void);
+
+int dhd_wlan_deinit(void);
+
 #endif /* __DHD_LINUX_H__ */

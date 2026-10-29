@@ -884,11 +884,20 @@ wl_cfgp2p_enable_discovery(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	CFGP2P_DBG(("enter\n"));
 	mutex_lock(&cfg->if_sync);
 #ifdef WL_IFACE_MGMT
-	if ((ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_P2P_DISC)) != BCME_OK) {
+	mutex_unlock(&cfg->if_sync);
+	ret = wl_cfg80211_handle_if_role_conflict(cfg, WL_IF_TYPE_P2P_DISC);
+	mutex_lock(&cfg->if_sync);
+	if (ret != BCME_OK) {
 		WL_ERR(("secondary iface is active, p2p enable discovery is not supported\n"));
 		goto exit;
 	}
 #endif /* WL_IFACE_MGMT */
+
+	if (!wl_get_drv_status(cfg, READY, bcmcfg_to_prmry_ndev(cfg))) {
+		WL_ERR(("device stopped during interface policy\n"));
+		ret = -EIO;
+		goto exit;
+	}
 
 	if (wl_get_p2p_status(cfg, DISCOVERY_ON)) {
 		CFGP2P_DBG((" DISCOVERY is already initialized, we have nothing to do\n"));
@@ -1369,7 +1378,7 @@ wl_cfgp2p_vndr_ie(struct bcm_cfg80211 *cfg, u8 *iebuf, s32 pktflag,
 	}
 
 	/* Copy the vndr_ie SET command ("add"/"del") to the buffer */
-	strlcpy(hdr.cmd, add_del_cmd, sizeof(hdr.cmd));
+	strscpy(hdr.cmd, add_del_cmd, sizeof(hdr.cmd));
 
 	/* Set the IE count - the buffer contains only 1 IE */
 	iecount = htod32(1);
@@ -2090,7 +2099,7 @@ wl_cfgp2p_down(struct bcm_cfg80211 *cfg)
 	if (cfg->p2p_wdev) {
 		/* If p2p wdev is left out, clean it up */
 		WL_ERR(("Clean up the p2p discovery IF\n"));
-		wl_cfgp2p_del_p2p_disc_if(cfg->p2p_wdev, cfg);
+		wl_cfgp2p_del_p2p_disc_if_locked(cfg->p2p_wdev, cfg);
 	}
 #endif /* WL_CFG80211_P2P_DEV_IF !defined(KEEP_WIFION_OPTION) */
 
@@ -2554,7 +2563,7 @@ wl_cfgp2p_register_ndev(struct bcm_cfg80211 *cfg)
 	}
 #endif /* WL_NEWCFG_PRIVCMD_SUPPORT */
 
-	strlcpy(net->name, "p2p%d", sizeof(net->name));
+	strscpy(net->name, "p2p%d", sizeof(net->name));
 
 	/* Copy the reference to bcm_cfg80211 */
 	memcpy((void *)netdev_priv(net), &cfg, sizeof(struct bcm_cfg80211 *));
@@ -2678,6 +2687,12 @@ wl_cfgp2p_add_p2p_disc_if(struct bcm_cfg80211 *cfg)
 
 	if (!cfg || !cfg->p2p_supported)
 		return ERR_PTR(-EINVAL);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* nl80211 initializes/registers this netless wdev after our return. */
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(bcmcfg_to_wiphy(cfg));
+	lockdep_assert_held(&cfg->if_sync);
+#endif
 
 	WL_TRACE(("Enter\n"));
 
@@ -2704,7 +2719,7 @@ wl_cfgp2p_add_p2p_disc_if(struct bcm_cfg80211 *cfg)
 		 * even after ifconfig wlan0 down. So delete the iface
 		 * first and then indicate the HANG event
 		 */
-		wl_cfgp2p_del_p2p_disc_if(cfg->p2p_wdev, cfg);
+		wl_cfgp2p_del_p2p_disc_if_locked(cfg->p2p_wdev, cfg);
 #else
 		dhd->hang_reason = HANG_REASON_IFACE_DEL_FAILURE;
 
@@ -2841,15 +2856,28 @@ wl_cfgp2p_stop_p2p_device(struct wiphy *wiphy, struct wireless_dev *wdev)
 }
 
 int
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+wl_cfgp2p_del_p2p_disc_if_locked(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
+#else
 wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
+#endif
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0))
 	bool rollback_lock = false;
+#endif
 
 	if (!wdev || !cfg) {
 		WL_ERR(("wdev or cfg is NULL\n"));
 		return -EINVAL;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(bcmcfg_to_wiphy(cfg));
+	lockdep_assert_held(&cfg->if_sync);
+	if (wdev != cfg->p2p_wdev)
+		return -EINVAL;
+#endif
 	WL_INFORM(("Enter\n"));
 
 	if (!cfg->p2p_wdev) {
@@ -2868,6 +2896,11 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 		}
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* A failed create may never have returned to the native registrar. */
+	if (wdev->registered)
+		cfg80211_unregister_wdev(wdev);
+#else
 	if (!rtnl_is_locked()) {
 		rtnl_lock();
 		rollback_lock = true;
@@ -2877,6 +2910,7 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 
 	if (rollback_lock)
 		rtnl_unlock();
+#endif
 
 	synchronize_rcu();
 
@@ -2888,6 +2922,25 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 
 	return 0;
 }
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+/* Process-owned entry; caller pins cfg and holds no native/private mutex. */
+int wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
+{
+	int ret;
+
+	if (!cfg)
+		return -EINVAL;
+	rtnl_lock();
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
+	mutex_lock(&cfg->if_sync);
+	ret = wl_cfgp2p_del_p2p_disc_if_locked(wdev, cfg);
+	mutex_unlock(&cfg->if_sync);
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
+	rtnl_unlock();
+	return ret;
+}
+#endif
 #endif /* WL_CFG80211_P2P_DEV_IF */
 
 void
@@ -2978,7 +3031,7 @@ wl_cfgp2p_if_add(struct bcm_cfg80211 *cfg, wl_iftype_t wl_iftype,
 		wl_cfgp2p_init_discovery(cfg);
 	}
 
-	strlcpy(cfg->p2p->vir_ifname, name, sizeof(cfg->p2p->vir_ifname));
+	strscpy(cfg->p2p->vir_ifname, name, sizeof(cfg->p2p->vir_ifname));
 	/* In concurrency case, STA may be already associated in a particular channel.
 	 * so retrieve the current channel of primary interface and then start the virtual
 	 * interface on that.
@@ -3095,7 +3148,7 @@ wl_cfgp2p_if_del(struct wiphy *wiphy, struct wireless_dev *wdev)
 #ifdef WL_CFG80211_P2P_DEV_IF
 	if (wdev->iftype == NL80211_IFTYPE_P2P_DEVICE) {
 		/* Handle dedicated P2P discovery interface. */
-		return wl_cfgp2p_del_p2p_disc_if(wdev, cfg);
+		return wl_cfgp2p_del_p2p_disc_if_locked(wdev, cfg);
 	}
 #endif /* WL_CFG80211_P2P_DEV_IF */
 

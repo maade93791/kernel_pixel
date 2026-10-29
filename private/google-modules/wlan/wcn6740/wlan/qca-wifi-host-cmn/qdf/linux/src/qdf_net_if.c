@@ -27,21 +27,6 @@
 #include "qdf_util.h"
 #include <linux/netdevice.h>
 
-QDF_STATUS
-qdf_net_if_create_dummy_if(struct qdf_net_if *nif)
-{
-	int ret;
-
-	if (!nif)
-		return QDF_STATUS_E_INVAL;
-
-	ret = init_dummy_netdev((struct net_device *)nif);
-
-	return qdf_status_from_os_return(ret);
-}
-
-qdf_export_symbol(qdf_net_if_create_dummy_if);
-
 /**
  * qdf_net_if_get_devname() - Retrieve netdevice name
  * @nif: Abstraction of netdevice

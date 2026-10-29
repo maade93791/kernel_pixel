@@ -602,7 +602,7 @@ wl_cfgvendor_set_country(struct wiphy *wiphy,
 #endif /* WL_AUTO_COUNTRY */
 
 	/* country code is unique for dongle..hence using primary interface. */
-	err = wl_cfg80211_set_country_code(primary_ndev, country_code, true, true, 0);
+	err = wl_cfg80211_set_country_code_locked(primary_ndev, country_code, true, true, 0);
 	if (err < 0) {
 		WL_ERR(("Set country failed ret:%d\n", err));
 		goto exit;
@@ -1836,7 +1836,10 @@ wl_cfgvendor_set_hal_started(struct wiphy *wiphy,
 						(char*)nla_data(data)));
 				}
 				WL_INFORM(("%s, dhd_open start\n", __FUNCTION__));
+				/* Open/stop reenters native netdevice lifecycle paths. */
+				wiphy_unlock(wiphy);
 				ret = dhd_open(ndev);
+				wiphy_lock(wiphy);
 				if (ret != BCME_OK) {
 					WL_INFORM(("%s, dhd_open failed\n", __FUNCTION__));
 					goto exit;
@@ -1899,7 +1902,10 @@ wl_cfgvendor_stop_hal(struct wiphy *wiphy,
 	if (dhd->stop_in_progress) {
 		WL_INFORM(("dhd_stop in progress, skip\n"));
 	} else if (dhd->if_opened) {
+		/* Open/stop reenters native netdevice lifecycle paths. */
+		wiphy_unlock(wiphy);
 		dhd_stop(ndev);
+		wiphy_lock(wiphy);
 	}
 	cfg->hal_state = HAL_IDLE;
 	return BCME_OK;
@@ -4150,7 +4156,10 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			cmd_buf[WL_DRIVER_PRIV_CMD_LEN - 1] = '\0';
 
 			WL_DBG(("vendor_command: %s len: %u \n", cmd_buf, cmd_buf_len));
+			/* Match the native RTNL-only Android IOCTL entry. */
+			wiphy_unlock(wiphy);
 			bytes_written = wl_handle_private_cmd(net, cmd_buf, cmd_buf_len);
+			wiphy_lock(wiphy);
 			WL_DBG(("bytes_written: %d \n", bytes_written));
 			if (bytes_written == 0) {
 				snprintf(cmd_buf, cmd_buf_len, "%s", "OK");
@@ -4480,7 +4489,7 @@ wl_cfgvendor_add_nan_reason_str(nan_status_type_t status, nan_hal_resp_t *nan_re
 	int num = (int)(sizeof(nan_status_reasonstr_map)/sizeof(nan_status_reasonstr_map[0]));
 	for (i = 0; i < num; i++) {
 		if (nan_status_reasonstr_map[i].status == status) {
-			strlcpy(nan_req_resp->nan_reason, nan_status_reasonstr_map[i].nan_reason,
+			strscpy(nan_req_resp->nan_reason, nan_status_reasonstr_map[i].nan_reason,
 				sizeof(nan_status_reasonstr_map[i].nan_reason));
 			break;
 		}
@@ -4775,7 +4784,7 @@ wl_cfgvendor_nan_parse_datapath_args(struct wiphy *wiphy,
 				ret = -EINVAL;
 				goto exit;
 			}
-			strlcpy((char *)cmd_data->ndp_iface, (char *)nla_data(iter),
+			strscpy((char *)cmd_data->ndp_iface, (char *)nla_data(iter),
 				nla_len(iter));
 			break;
 		case NAN_ATTRIBUTE_SECURITY:
@@ -8110,7 +8119,7 @@ wl_cfgvendor_nan_start_handler(struct wiphy *wiphy,
 	}
 	NAN_DBG_ENTER();
 
-	ret = wl_cfgnan_check_nan_disable_pending(cfg, false, true);
+	ret = wl_cfgnan_check_nan_disable_pending(cfg, false);
 	if (ret != BCME_OK) {
 		WL_ERR(("failed to disable nan, error[%d]\n", ret));
 		goto exit;
@@ -8309,12 +8318,10 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 			*/
 			WL_INFORM_MEM(("Schedule Nan Disable Req with NAN_DISABLE_CMD_DELAY\n"));
 			delay_ms = NAN_DISABLE_CMD_DELAY;
-			DHD_NAN_WAKE_LOCK_TIMEOUT(cfg->pub, NAN_WAKELOCK_TIMEOUT);
 		} else {
 			delay_ms = 0;
 		}
-		schedule_delayed_work(&nancfg->nan_disable,
-			msecs_to_jiffies(delay_ms));
+		wl_cfgnan_schedule_disable(cfg, delay_ms);
 	}
 exit:
 	mutex_unlock(&cfg->if_sync);
@@ -8986,7 +8993,6 @@ wl_cfgvendor_nan_cmn_process_bootstrapping_cmd(struct wiphy *wiphy,
 		goto exit;
 	}
 
-	wdev = bcmcfg_to_prmry_wdev(cfg);
 	ret = wl_cfgvendor_nan_parse_discover_args(wiphy, data, len, cmd_data);
 	if (ret) {
 		WL_ERR((" Failed to parse nan BS vendor args, ret = %d\n",
@@ -10792,7 +10798,7 @@ static int wl_cfgvendor_dbg_get_ring_data(struct wiphy *wiphy,
 		type = nla_type(iter);
 		switch (type) {
 			case DEBUG_ATTRIBUTE_RING_NAME:
-				strlcpy(ring_name, nla_data(iter), sizeof(ring_name));
+				strscpy(ring_name, nla_data(iter), sizeof(ring_name));
 				break;
 			default:
 				WL_ERR(("Unknown type: %d\n", type));
@@ -12766,7 +12772,7 @@ wl_set_ota_nvram_ext(dhd_pub_t *dhd)
 	info = dhd_find_naming_info_by_chip_rev(dhd, &is_murata_fem);
 	if (info) {
 		WL_INFORM(("Nvram extension prefix is [%s].\n", info->nvram_ext));
-		strlcpy(ota_info->nvram_ext, info->nvram_ext, MAX_EXT_INFO_LEN);
+		strscpy(ota_info->nvram_ext, info->nvram_ext, MAX_EXT_INFO_LEN);
 	} else {
 		WL_ERR(("info is null\n"));
 	}
@@ -14568,7 +14574,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_BRCM,
 			.subcmd = BRCM_VENDOR_SCMD_BCM_STR
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_priv_bcm_handler,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = brcm_drv_attr_policy,
@@ -14824,7 +14831,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = ANDR_WIFI_SET_COUNTRY
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_set_country,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = andr_wifi_attr_policy,
@@ -15111,7 +15119,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = NAN_WIFI_SUBCMD_ENABLE
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_nan_start_handler,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = nan_attr_policy,
@@ -15216,7 +15225,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = NAN_WIFI_SUBCMD_DATA_PATH_IFACE_CREATE
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_nan_data_path_iface_create,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = nan_attr_policy,
@@ -15228,7 +15238,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = NAN_WIFI_SUBCMD_DATA_PATH_IFACE_DELETE
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_nan_data_path_iface_delete,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = nan_attr_policy,
@@ -15528,7 +15539,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = DEBUG_SET_HAL_START
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_set_hal_started,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = hal_start_attr_policy,
@@ -15540,7 +15552,8 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_GOOGLE,
 			.subcmd = DEBUG_SET_HAL_STOP
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_stop_hal
 	},
 	{
@@ -15588,7 +15601,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 			.vendor_id = OUI_BRCM,
 			.subcmd = BRCM_VENDOR_SCMD_SET_MAC
 		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_RTNL,
 		.doit = wl_cfgvendor_set_p2p_rand_mac,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = brcm_drv_attr_policy,

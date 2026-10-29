@@ -168,7 +168,11 @@ extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	u32 peer_capability, const u8 *buf, size_t len);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
-       const u8 *peer, u8 action_code, u8 dialog_token, u16 status_code,
+	const u8 *peer,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+	int link_id,
+#endif
+	u8 action_code, u8 dialog_token, u16 status_code,
        u32 peer_capability, bool initiator, const u8 *buf, size_t len);
 #else /* CONFIG_ARCH_MSM && TDLS_MGMT_VERSION2 */
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
@@ -252,4 +256,14 @@ extern bool wl_cfg80211_is_tdls_tunneled_frame(void *frame, u32 frame_len);
 extern void wl_restore_ap_bw(struct bcm_cfg80211 *cfg);
 #endif /* SUPPORT_AP_BWCTRL */
 extern uint32 wl_cfgvif_get_iftype_count(struct bcm_cfg80211 *cfg, wl_iftype_t iftype);
+void wl_validate_wps_ie(const char *wps_ie, s32 wps_ie_len, bool *pbc);
+
+s32 wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
+	struct ieee80211_channel *chan, enum nl80211_channel_type channel_type);
+
+#ifdef WL_CFG80211_MONITOR
+int wl_cfg80211_set_monitor_channel(struct wiphy *wiphy,
+				    struct cfg80211_chan_def *chandef);
+#endif /* WL_CFG80211_MONITOR */
+
 #endif /* _wl_cfgvif_h_ */

@@ -544,7 +544,13 @@ static int __wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
  *
  * Return: 0 for success, error number on failure.
  */
-#if TDLS_MGMT_VERSION2
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+int wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
+				struct net_device *dev, const u8 *peer,
+				int link_id, u8 action_code, u8 dialog_token,
+				u16 status_code, u32 peer_capability,
+				bool initiator, const u8 *buf, size_t len)
+#elif TDLS_MGMT_VERSION2
 int wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
 					struct net_device *dev,
 					u8 *peer, u8 action_code,
@@ -585,6 +591,12 @@ int wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
 {
 	int errno;
 	struct osif_vdev_sync *vdev_sync;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+
+	/* -1 is the native unspecified/non-MLO link; 0 is the only link. */
+	if (link_id < -1 || link_id > 0)
+		return -EOPNOTSUPP;
+#endif
 
 	errno = osif_vdev_sync_op_start(dev, &vdev_sync);
 	if (errno)

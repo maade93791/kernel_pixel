@@ -20,6 +20,7 @@
 #ifndef _DP_TXRX_H
 #define _DP_TXRX_H
 
+#include <net/gro.h>
 #include <wlan_objmgr_psoc_obj.h>
 #include <dp_rx_thread.h>
 #include <qdf_trace.h>
@@ -68,11 +69,7 @@ static inline void dp_rx_napi_gro_flush(struct napi_struct *napi,
 		if (flush_code != DP_RX_GRO_LOW_TPUT_FLUSH)
 			napi_gro_flush(napi, false);
 
-		if (napi->rx_count) {
-			netif_receive_skb_list(&napi->rx_list);
-			qdf_init_list_head(&napi->rx_list);
-			napi->rx_count = 0;
-		}
+		gro_normal_list(&napi->gro);
 	}
 }
 #else

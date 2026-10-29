@@ -46,7 +46,7 @@
 #include <linux/ethtool.h>
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
@@ -2292,6 +2292,13 @@ typedef enum dhd_ioctl_recieved_status
  * condition among wifi on/off and interface operation functions
  */
 #if defined(LINUX)
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+struct wiphy;
+/* Success owns RTNL, wiphy and DHD net-if; caller must use the matching unlock. */
+struct wiphy *dhd_netdev_lifecycle_lock(dhd_pub_t *dhdp, int ifidx);
+void dhd_netdev_lifecycle_unlock(dhd_pub_t *dhdp, struct wiphy *wiphy);
+#endif
+
 void dhd_net_if_lock(struct net_device *dev);
 void dhd_net_if_unlock(struct net_device *dev);
 #endif /* LINUX */

@@ -50,34 +50,6 @@ static void osif_cm_free_wep_key_params(struct wlan_cm_connect_req *connect_req)
 	}
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
-static QDF_STATUS
-osif_cm_update_wep_seq_info(struct wlan_cm_connect_req *connect_req,
-			    const struct cfg80211_connect_params *req)
-{
-	if (req->crypto.wep_keys->seq_len) {
-		connect_req->crypto.wep_keys.seq_len =
-						req->crypto.wep_keys->seq_len;
-		connect_req->crypto.wep_keys.seq =
-			qdf_mem_malloc(connect_req->crypto.wep_keys.seq_len);
-		if (!connect_req->crypto.wep_keys.seq) {
-			osif_cm_free_wep_key_params(connect_req);
-			return QDF_STATUS_E_NOMEM;
-		}
-		qdf_mem_copy(connect_req->crypto.wep_keys.seq,
-			     req->crypto.wep_keys->seq,
-			     connect_req->crypto.wep_keys.seq_len);
-	}
-	return QDF_STATUS_SUCCESS;
-}
-#else
-static inline QDF_STATUS
-osif_cm_update_wep_seq_info(struct wlan_cm_connect_req *connect_req,
-			    const struct cfg80211_connect_params *req)
-{
-	return QDF_STATUS_SUCCESS;
-}
-#endif
 
 static QDF_STATUS
 osif_cm_set_wep_key_params(struct wlan_cm_connect_req *connect_req,
@@ -97,7 +69,7 @@ osif_cm_set_wep_key_params(struct wlan_cm_connect_req *connect_req,
 	qdf_mem_copy(connect_req->crypto.wep_keys.key, req->key,
 		     connect_req->crypto.wep_keys.key_len);
 
-	return osif_cm_update_wep_seq_info(connect_req, req);
+	return QDF_STATUS_SUCCESS;
 }
 
 static void osif_cm_set_auth_type(struct wlan_cm_connect_req *connect_req,

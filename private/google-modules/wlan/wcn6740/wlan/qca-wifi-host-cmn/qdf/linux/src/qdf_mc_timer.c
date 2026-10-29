@@ -506,7 +506,7 @@ QDF_STATUS qdf_mc_timer_destroy(qdf_mc_timer_t *timer)
 
 	case QDF_TIMER_STATE_RUNNING:
 		/* Stop the timer first */
-		del_timer(&(timer->platform_info.timer));
+		timer_delete(&timer->platform_info.timer);
 		v_status = QDF_STATUS_SUCCESS;
 		break;
 	case QDF_TIMER_STATE_STOPPED:
@@ -593,7 +593,7 @@ QDF_STATUS qdf_mc_timer_destroy(qdf_mc_timer_t *timer)
 
 	case QDF_TIMER_STATE_RUNNING:
 		/* Stop the timer first */
-		del_timer(&(timer->platform_info.timer));
+		timer_delete(&timer->platform_info.timer);
 		v_status = QDF_STATUS_SUCCESS;
 		break;
 
@@ -687,7 +687,7 @@ QDF_STATUS qdf_mc_timer_start(qdf_mc_timer_t *timer, uint32_t expiration_time)
 	}
 
 	/* start the timer */
-	mod_timer(&(timer->platform_info.timer),
+	mod_timer(&timer->platform_info.timer,
 		  jiffies + __qdf_scaled_msecs_to_jiffies(expiration_time));
 
 	timer->state = QDF_TIMER_STATE_RUNNING;
@@ -753,7 +753,7 @@ QDF_STATUS qdf_mc_timer_stop(qdf_mc_timer_t *timer)
 
 	qdf_spin_unlock_irqrestore(&timer->platform_info.spinlock);
 
-	del_timer(&(timer->platform_info.timer));
+	timer_delete(&timer->platform_info.timer);
 
 	qdf_spin_lock_irqsave(&timer->platform_info.spinlock);
 	timer->state = QDF_TIMER_STATE_STOPPED;
@@ -795,7 +795,7 @@ QDF_STATUS qdf_mc_timer_stop_sync(qdf_mc_timer_t *timer)
 	timer->state = QDF_TIMER_STATE_STOPPED;
 
 	qdf_spin_unlock_irqrestore(&timer->platform_info.spinlock);
-	del_timer_sync(&(timer->platform_info.timer));
+	timer_delete_sync(&timer->platform_info.timer);
 
 	qdf_try_allowing_sleep(timer->type);
 

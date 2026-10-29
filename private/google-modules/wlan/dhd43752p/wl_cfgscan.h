@@ -130,7 +130,11 @@ extern s32 wl_cfgscan_notify_listen_complete(struct bcm_cfg80211 *cfg);
 extern s32 wl_cfgscan_cancel_listen_on_channel(struct bcm_cfg80211 *cfg, bool notify_user);
 #if defined(WL_CFG80211_P2P_DEV_IF)
 extern s32 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
-	struct ieee80211_channel *channel, unsigned int duration, u64 *cookie);
+	struct ieee80211_channel *channel, unsigned int duration, u64 *cookie
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	, const u8 *rx_addr
+#endif
+);
 #else
 extern s32 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 	struct ieee80211_channel *channel, enum nl80211_channel_type channel_type,
@@ -202,5 +206,7 @@ wl_cfg80211_add_iw_ie(struct bcm_cfg80211 *cfg, struct net_device *ndev, s32 bss
 extern s32
 wl_cfg80211_clear_iw_ie(struct bcm_cfg80211 *cfg, struct net_device *ndev, s32 bssidx);
 #endif /* WL11U */
+
+void wl_notify_scan_done(struct bcm_cfg80211 *cfg, bool aborted);
 
 #endif /* _wl_cfgscan_h_ */

@@ -29,6 +29,7 @@
 #include <dhd_config.h>
 #include <dhd_dbg.h>
 #include <dhd_linux_priv.h>
+#include <dhd_common.h>
 #if defined(WL_CFG80211)
 #include <wl_cfg80211.h>
 #endif	/* WL_CFG80211 */
@@ -39,7 +40,6 @@
 #define LEGACY_RATE_COUNT 8
 #define MAX_MASK_PATTERN_FILTER_LEN 64
 
-extern int pattern_atoh_len(char *src, char *dst, int len);
 
 int
 dhd_preinit_proc(dhd_pub_t *dhd, int ifidx, char *name, char *value)

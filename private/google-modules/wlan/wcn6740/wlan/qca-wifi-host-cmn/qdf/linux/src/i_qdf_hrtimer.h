@@ -32,7 +32,7 @@
 #include <i_qdf_trace.h>
 
 /* hrtimer data type */
-typedef struct {
+typedef struct __qdf_hrtimer_data {
 	union {
 		struct hrtimer hrtimer;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0))
@@ -40,7 +40,18 @@ typedef struct {
 #endif
 	} u;
 	enum qdf_context_mode ctx;
+	enum qdf_hrtimer_restart_status
+		(*callback)(struct __qdf_hrtimer_data *timer);
 } __qdf_hrtimer_data_t;
+
+static inline enum hrtimer_restart
+__qdf_hrtimer_shim(struct hrtimer *hrtimer)
+{
+	__qdf_hrtimer_data_t *timer;
+
+	timer = container_of(hrtimer, __qdf_hrtimer_data_t, u.hrtimer);
+	return (enum hrtimer_restart)timer->callback(timer);
+}
 
 /**
  * __qdf_hrtimer_get_mode() - Get hrtimer_mode with qdf mode
@@ -133,7 +144,8 @@ int __qdf_hrtimer_cancel(__qdf_hrtimer_data_t *timer)
  */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0))
 static inline void  __qdf_hrtimer_init(__qdf_hrtimer_data_t *timer,
-				       void *cback,
+				       enum qdf_hrtimer_restart_status
+				       (*cback)(__qdf_hrtimer_data_t *),
 				       enum qdf_clock_id clock,
 				       enum qdf_hrtimer_mode mode,
 				       enum qdf_context_mode ctx)
@@ -144,15 +156,16 @@ static inline void  __qdf_hrtimer_init(__qdf_hrtimer_data_t *timer,
 	timer->ctx = ctx;
 
 	if (timer->ctx == QDF_CONTEXT_HARDWARE) {
-		hrtimer_init(hrtimer, clock, hrt_mode);
-		hrtimer->function = cback;
+		timer->callback = cback;
+		hrtimer_setup(hrtimer, __qdf_hrtimer_shim, clock, hrt_mode);
 	} else if (timer->ctx == QDF_CONTEXT_TASKLET) {
 		QDF_BUG(0);
 	}
 }
 #else
 static inline void  __qdf_hrtimer_init(__qdf_hrtimer_data_t *timer,
-				       void *cback,
+				       enum qdf_hrtimer_restart_status
+				       (*cback)(__qdf_hrtimer_data_t *),
 				       enum qdf_clock_id clock,
 				       enum qdf_hrtimer_mode mode,
 				       enum qdf_context_mode ctx)

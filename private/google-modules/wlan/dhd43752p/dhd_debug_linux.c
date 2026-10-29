@@ -23,6 +23,7 @@
  * $Id$
  */
 
+#include <linux/sched/clock.h>
 #include <typedefs.h>
 #include <osl.h>
 #include <bcmutils.h>

@@ -53,4 +53,6 @@ void dhd_event_log_filter_notify_connect_done(dhd_pub_t *dhdp, uint8 *bssid, int
 #ifdef WLADPS_ENERGY_GAIN
 int dhd_event_log_filter_adps_energy_gain(dhd_pub_t *dhdp);
 #endif /* WLADPS_ENERGY_GAIN */
+uint32 dhd_event_log_filter_serialize(dhd_pub_t *dhdp, char *in_buf, uint32 tot_len, int type);
+
 #endif /* !dhd_event_log_filter_h */

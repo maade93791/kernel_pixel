@@ -23,6 +23,7 @@
 
 #ifndef _wl_cfgnan_h_
 #define _wl_cfgnan_h_
+#include <linux/spinlock.h>
 
 /* NAN structs versioning b/w DHD and HAL
 * define new version if any change in any of the shared structs
@@ -767,6 +768,11 @@ typedef struct wl_nancfg
 	u8 nan_nmi_mac[ETH_ALEN];
 	u8 nan_dp_count;
 	struct delayed_work	nan_disable;
+	spinlock_t nan_disable_lock;
+	unsigned long nan_disable_deadline;
+	bool nan_disable_pending;
+	bool nan_disable_stopping;
+	bool nan_disable_wake_held;
 	int nan_disc_count;
 	nan_disc_result_cache *nan_disc_cache;
 	nan_svc_info_t svc_info[NAN_MAX_SVC_INST];
@@ -802,7 +808,9 @@ typedef struct wl_nancfg
 
 bool wl_cfgnan_is_enabled(struct bcm_cfg80211 *cfg);
 int wl_cfgnan_check_nan_disable_pending(struct bcm_cfg80211 *cfg,
-bool force_disable, bool is_sync_reqd);
+bool force_disable);
+void wl_cfgnan_schedule_disable(struct bcm_cfg80211 *cfg, uint32 delay_ms);
+void wl_cfgnan_quiesce_disable(struct bcm_cfg80211 *cfg);
 int wl_cfgnan_start_handler(struct net_device *ndev,
 	struct bcm_cfg80211 *cfg, nan_config_cmd_data_t *cmd_data, uint32 nan_attr_mask);
 int wl_cfgnan_stop_handler(struct net_device *ndev, struct bcm_cfg80211 *cfg);

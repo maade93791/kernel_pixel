@@ -39,7 +39,6 @@
 #include <bcmpcie.h>
 #include <bcmmsgbuf.h>
 
-extern void dhd_msgbuf_delay_post_ts_bufs(dhd_pub_t *dhd);
 
 #define MAX_FW_CLKINFO_TYPES		8
 #define MAX_SIZE_FW_CLKINFO_TYPE	(MAX_FW_CLKINFO_TYPES * sizeof(ts_fw_clock_info_t))

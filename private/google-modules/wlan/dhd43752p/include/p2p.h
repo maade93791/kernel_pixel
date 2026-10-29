@@ -474,9 +474,9 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_pub_act_frame {
 	uint8	oui_type;	/* OUI type - P2P_VER */
 	uint8	subtype;	/* OUI subtype - P2P_TYPE_* */
 	uint8	dialog_token;	/* nonzero, identifies req/rsp transaction */
-	uint8	elts[1];	/* Variable length information elements.  Max size =
-				 * ACTION_FRAME_SIZE - sizeof(this structure) - 1
-				 */
+	uint8	elts[];	/* Variable length IEs, at most
+			 * ACTION_FRAME_SIZE - P2P_PUB_AF_FIXED_LEN bytes.
+			 */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_pub_act_frame wifi_p2p_pub_act_frame_t;
 #define P2P_PUB_AF_FIXED_LEN	8

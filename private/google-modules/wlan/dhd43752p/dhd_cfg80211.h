@@ -46,4 +46,6 @@ s32 dhd_config_dongle(struct bcm_cfg80211 *cfg);
 int dhd_cfgvendor_priv_string_handler(struct bcm_cfg80211 *cfg,
 	struct wireless_dev *wdev, const struct bcm_nlmsg_hdr *nlioc, void  *data);
 s32 wl_dongle_roam(struct net_device *ndev, u32 roamvar, u32 bcn_timeout);
+void dhd_netdev_free(struct net_device *ndev);
+
 #endif /* __DHD_CFG80211__ */

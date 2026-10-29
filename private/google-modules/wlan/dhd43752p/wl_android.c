@@ -23,6 +23,7 @@
 
 #include <linux/module.h>
 #include <linux/netdevice.h>
+#include <linux/rtnetlink.h>
 #include <net/netlink.h>
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
@@ -855,7 +856,6 @@ int dhd_net_bus_devreset(struct net_device *dev, uint8 flag);
 int dhd_dev_init_ioctl(struct net_device *dev);
 #ifdef WL_CFG80211
 int wl_cfg80211_get_p2p_dev_addr(struct net_device *net, struct ether_addr *p2pdev_addr);
-int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *command);
 #ifdef WES_SUPPORT
 int wl_cfg80211_set_wes_mode(struct net_device *dev, int mode);
 int wl_cfg80211_get_wes_mode(struct net_device *dev);
@@ -1331,7 +1331,7 @@ static int wl_android_set_suspendmode(struct net_device *dev, char *command)
 	return ret;
 }
 
-int wl_android_get_80211_mode(struct net_device *dev, char *command, int total_len)
+static int wl_android_get_80211_mode(struct net_device *dev, char *command, int total_len)
 {
 	uint8 mode[5];
 	int  error = 0;
@@ -1350,7 +1350,7 @@ int wl_android_get_80211_mode(struct net_device *dev, char *command, int total_l
 
 extern chanspec_t
 wl_chspec_driver_to_host(chanspec_t chanspec);
-int wl_android_get_chanspec(struct net_device *dev, char *command, int total_len)
+static int wl_android_get_chanspec(struct net_device *dev, char *command, int total_len)
 {
 	int error = 0;
 	int bytes_written = 0;
@@ -1423,7 +1423,7 @@ int wl_android_get_chanspec(struct net_device *dev, char *command, int total_len
 }
 
 /* returns current datarate datarate returned from firmware are in 500kbps */
-int wl_android_get_datarate(struct net_device *dev, char *command, int total_len)
+static int wl_android_get_datarate(struct net_device *dev, char *command, int total_len)
 {
 	int  error = 0;
 	int datarate = 0;
@@ -1438,7 +1438,7 @@ int wl_android_get_datarate(struct net_device *dev, char *command, int total_len
 	bytes_written = snprintf(command, total_len, "%s %d", CMD_DATARATE, (datarate/2));
 	return bytes_written;
 }
-int wl_android_get_assoclist(struct net_device *dev, char *command, int total_len)
+static int wl_android_get_assoclist(struct net_device *dev, char *command, int total_len)
 {
 	int  error = 0;
 	int bytes_written = 0;
@@ -4623,8 +4623,7 @@ static int wl_android_get_p2p_dev_addr(struct net_device *ndev, char *command, i
 	int ret;
 	struct ether_addr p2pdev_addr;
 
-#define MAC_ADDR_STR_LEN 18
-	if (total_len < MAC_ADDR_STR_LEN) {
+	if (total_len < MAC_ADDR_STR_LEN + 1) {
 		DHD_ERROR(("wl_android_get_p2p_dev_addr: buflen %d is less than p2p dev addr\n",
 			total_len));
 		return -1;
@@ -6412,9 +6411,9 @@ done:
 	return ret;
 }
 
-s32
+static s32
 wl_android_get_freq_list_chanspecs(struct net_device *ndev, wl_uint32_list_t *list,
-	s32 buflen, const char* cmd_str, int sta_channel, chanspec_band_t sta_acs_band)
+	s32 buflen, const char *cmd_str, int sta_channel, chanspec_band_t sta_acs_band)
 {
 	u32 freq = 0;
 	chanspec_t chanspec = 0;
@@ -6488,7 +6487,7 @@ wl_android_get_freq_list_chanspecs(struct net_device *ndev, wl_uint32_list_t *li
 	return ret;
 }
 
-s32
+static s32
 wl_android_get_band_chanspecs(struct net_device *ndev, void *buf, s32 buflen,
 	chanspec_band_t band, bool acs_req)
 {
@@ -6605,8 +6604,8 @@ wl_android_restore_auto_channel_scan_state(struct net_device *ndev)
 	return BCME_OK;
 }
 
-s32
-wl_android_get_best_channels(struct net_device *dev, char* cmd, int total_len)
+static s32
+wl_android_get_best_channels(struct net_device *dev, char *cmd, int total_len)
 {
 	int channel = 0;
 	s32 ret = BCME_ERROR;
@@ -7675,7 +7674,7 @@ wl_android_get_tid(struct net_device *dev, char* command, int total_len)
 #endif /* SUPPORT_SET_TID */
 #endif /* CUSTOMER_HW4_PRIVATE_CMD */
 
-int wl_android_set_roam_mode(struct net_device *dev, char *command)
+static int wl_android_set_roam_mode(struct net_device *dev, char *command)
 {
 	int error = 0;
 	int mode = 0;
@@ -7698,7 +7697,7 @@ int wl_android_set_roam_mode(struct net_device *dev, char *command)
 	return 0;
 }
 
-int wl_android_set_ibss_beacon_ouidata(struct net_device *dev, char *command, int total_len)
+static int wl_android_set_ibss_beacon_ouidata(struct net_device *dev, char *command, int total_len)
 {
 	char ie_buf[VNDR_IE_MAX_LEN];
 	char *ioctl_buf = NULL;
@@ -8582,7 +8581,7 @@ int wl_android_set_ibss_antenna(struct net_device *dev, char *command, int total
 }
 #endif /* WLAIBSS */
 
-int wl_keep_alive_set(struct net_device *dev, char* extra)
+static int wl_keep_alive_set(struct net_device *dev, char *extra)
 {
 	wl_mkeep_alive_pkt_t	mkeep_alive_pkt;
 	int ret;
@@ -8847,7 +8846,7 @@ wl_cfg80211_p2plo_deinit(struct bcm_cfg80211 *cfg)
 
 	return  ret;
 }
-s32
+static s32
 wl_cfg80211_p2plo_listen_start(struct net_device *dev, u8 *buf, int len)
 {
 	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
@@ -8858,6 +8857,8 @@ wl_cfg80211_p2plo_listen_start(struct net_device *dev, u8 *buf, int len)
 	int period = 0;
 	int interval = 0;
 	int count = 0;
+	ASSERT_RTNL();
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
 	if (WL_DRV_STATUS_SENDING_AF_FRM_EXT(cfg)) {
 		WL_ERR(("Sending Action Frames. Try it again.\n"));
 		goto exit;
@@ -8923,9 +8924,10 @@ wl_cfg80211_p2plo_listen_start(struct net_device *dev, u8 *buf, int len)
 
 	wl_set_p2p_status(cfg, DISC_IN_PROGRESS);
 exit :
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
 	return ret;
 }
-s32
+static s32
 wl_cfg80211_p2plo_listen_stop(struct net_device *dev)
 {
 	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
@@ -8943,8 +8945,8 @@ exit:
 	return ret;
 }
 
-s32
-wl_cfg80211_p2plo_offload(struct net_device *dev, char *cmd, char* buf, int len)
+static s32
+wl_cfg80211_p2plo_offload(struct net_device *dev, char *cmd, char *buf, int len)
 {
 	int ret = 0;
 
@@ -9266,7 +9268,7 @@ wl_android_get_lqcm_report(struct net_device *dev, char *command, int total_len)
 }
 #endif /* SUPPORT_LQCM */
 
-int
+static int
 wl_android_get_snr(struct net_device *dev, char *command, int total_len)
 {
 	int bytes_written, error = 0;
@@ -9285,7 +9287,7 @@ wl_android_get_snr(struct net_device *dev, char *command, int total_len)
 }
 
 #ifdef SUPPORT_AP_HIGHER_BEACONRATE
-int
+static int
 wl_android_set_ap_beaconrate(struct net_device *dev, char *command)
 {
 	int rate = 0;
@@ -9323,7 +9325,7 @@ wl_android_set_ap_beaconrate(struct net_device *dev, char *command)
 	return err;
 }
 
-int wl_android_get_ap_basicrate(struct net_device *dev, char *command, int total_len)
+static int wl_android_get_ap_basicrate(struct net_device *dev, char *command, int total_len)
 {
 	char *pos, *token;
 	char *ifname = NULL;
@@ -9355,7 +9357,7 @@ int wl_android_get_ap_basicrate(struct net_device *dev, char *command, int total
 #endif /* SUPPORT_AP_HIGHER_BEACONRATE */
 
 #ifdef SUPPORT_AP_RADIO_PWRSAVE
-int
+static int
 wl_android_get_ap_rps(struct net_device *dev, char *command, int total_len)
 {
 	char *pos, *token;
@@ -9389,7 +9391,7 @@ wl_android_get_ap_rps(struct net_device *dev, char *command, int total_len)
 
 }
 
-int
+static int
 wl_android_set_ap_rps(struct net_device *dev, char *command, int total_len)
 {
 	int enable = 0;
@@ -9429,7 +9431,7 @@ wl_android_set_ap_rps(struct net_device *dev, char *command, int total_len)
 	return err;
 }
 
-int
+static int
 wl_android_set_ap_rps_params(struct net_device *dev, char *command, int total_len)
 {
 	ap_rps_info_t rps;
@@ -9494,7 +9496,7 @@ wl_android_set_ap_rps_params(struct net_device *dev, char *command, int total_le
 #endif /* SUPPORT_AP_RADIO_PWRSAVE */
 
 #if defined(DHD_HANG_SEND_UP_TEST)
-void
+static void
 wl_android_make_hang_with_reason(struct net_device *dev, const char *string_num)
 {
 	dhd_make_hang_with_reason(dev, string_num);
@@ -10590,7 +10592,7 @@ exit:
 	return err;
 }
 
-int
+static int
 _wl_android_bcnrecv_stop(struct bcm_cfg80211 *cfg, struct net_device *ndev, uint reason)
 {
 	s32 err = BCME_OK;
@@ -11034,7 +11036,7 @@ wl_android_get_softap_elna_bypass(struct net_device *dev, char *command, int tot
 #endif /* SUPPORT_SOFTAP_ELNA_BYPASS */
 
 #ifdef WL_NAN
-int
+static int
 wl_android_get_nan_status(struct net_device *dev, char *command, int total_len)
 {
 	int bytes_written = 0;
@@ -13421,11 +13423,8 @@ wl_cfg80211_static_if_close(struct net_device *net)
 	struct net_device *primary_ndev = bcmcfg_to_prmry_ndev(cfg);
 
 	if (cfg->static_ndev_state == NDEV_STATE_FW_IF_CREATED) {
-		if (mutex_is_locked(&cfg->if_sync) == TRUE) {
-			ret = _wl_cfg80211_del_if(cfg, primary_ndev, net->ieee80211_ptr, net->name);
-		} else {
-			ret = wl_cfg80211_del_if(cfg, primary_ndev, net->ieee80211_ptr, net->name);
-		}
+		/* Actual static ndo_stop owns RTNL without DHD/private locks. */
+		ret = wl_cfg80211_del_if(cfg, primary_ndev, net->ieee80211_ptr, net->name);
 
 		if (unlikely(ret)) {
 			WL_ERR(("Del iface failed for static_if %d\n", ret));

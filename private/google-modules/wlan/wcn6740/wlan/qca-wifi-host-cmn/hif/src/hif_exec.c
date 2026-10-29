@@ -691,6 +691,9 @@ static void hif_exec_napi_kill(struct hif_exec_context *ctx)
 	struct hif_napi_exec_context *n_ctx = hif_exec_get_napi(ctx);
 	int irq_ind;
 
+	if (!n_ctx->netdev)
+		return;
+
 	if (ctx->inited) {
 		napi_disable(&n_ctx->napi);
 		ctx->inited = 0;
@@ -701,6 +704,8 @@ static void hif_exec_napi_kill(struct hif_exec_context *ctx)
 
 	hif_core_ctl_set_boost(false);
 	netif_napi_del(&(n_ctx->napi));
+	free_netdev(n_ctx->netdev);
+	n_ctx->netdev = NULL;
 }
 
 struct hif_execution_ops napi_sched_ops = {
@@ -721,12 +726,16 @@ static struct hif_exec_context *hif_exec_napi_create(uint32_t scale)
 	if (!ctx)
 		return NULL;
 
+	ctx->netdev = alloc_netdev_dummy(0);
+	if (!ctx->netdev) {
+		qdf_mem_free(ctx);
+		return NULL;
+	}
+
 	ctx->exec_ctx.sched_ops = &napi_sched_ops;
 	ctx->exec_ctx.inited = true;
 	ctx->exec_ctx.scale_bin_shift = scale;
-	qdf_net_if_create_dummy_if((struct qdf_net_if *)&ctx->netdev);
-	netif_napi_add_ni(&(ctx->netdev), &(ctx->napi), hif_exec_poll,
-		       QCA_NAPI_BUDGET);
+	netif_napi_add_weight(ctx->netdev, &ctx->napi, hif_exec_poll, QCA_NAPI_BUDGET);
 	napi_enable(&ctx->napi);
 
 	return &ctx->exec_ctx;

@@ -32,6 +32,7 @@
 #include <dhd_dbg.h>
 #include <dngl_stats.h>
 #include <dhd.h>
+#include <wb_regon_coordinator.h>
 #include <dhd_bus.h>
 #include <dhd_linux.h>
 #if defined(OEM_ANDROID)
@@ -97,8 +98,6 @@ extern void* wl_cfg80211_get_dhdp(struct net_device *dev);
 extern int dhd_wlan_init(void);
 extern int dhd_wlan_deinit(void);
 #ifdef WBRC
-extern int wbrc_init(void);
-extern void wbrc_exit(void);
 #endif /* WBRC */
 #endif /* defined(BCMDHD_MODULAR) && defined(BOARD_MODULAR_INIT) */
 
@@ -376,7 +375,7 @@ static int wifi_plat_dev_drv_probe(struct platform_device *pdev)
 	return wifi_plat_dev_probe_ret;
 }
 
-static int wifi_plat_dev_drv_remove(struct platform_device *pdev)
+static void wifi_plat_dev_drv_remove(struct platform_device *pdev)
 {
 	wifi_adapter_info_t *adapter;
 
@@ -399,7 +398,6 @@ static int wifi_plat_dev_drv_remove(struct platform_device *pdev)
 #ifdef CONFIG_DHD_DTS
 	regulator_put(wifi_regulator);
 #endif /* CONFIG_DHD_DTS */
-	return 0;
 }
 
 static int wifi_plat_dev_drv_suspend(struct platform_device *pdev, pm_message_t state)
@@ -566,7 +564,7 @@ static int wifi_ctrlfunc_register_drv(void)
 	return wifi_plat_dev_probe_ret;
 }
 
-void wifi_ctrlfunc_unregister_drv(void)
+static void wifi_ctrlfunc_unregister_drv(void)
 {
 
 #ifdef CONFIG_DHD_DTS
@@ -632,7 +630,7 @@ static int bcmdhd_wifi_plat_dev_drv_probe(struct platform_device *pdev)
 	return dhd_wifi_platform_load();
 }
 
-static int bcmdhd_wifi_plat_dev_drv_remove(struct platform_device *pdev)
+static void bcmdhd_wifi_plat_dev_drv_remove(struct platform_device *pdev)
 {
 	int i;
 	wifi_adapter_info_t *adapter;
@@ -644,7 +642,6 @@ static int bcmdhd_wifi_plat_dev_drv_remove(struct platform_device *pdev)
 		wifi_platform_set_power(adapter, FALSE, WIFI_TURNOFF_DELAY);
 		wifi_platform_bus_enumerate(adapter, FALSE);
 	}
-	return 0;
 }
 
 static struct platform_driver dhd_wifi_platform_dev_driver = {

@@ -159,13 +159,16 @@ void wl_cfg80211_cleanup_if(struct net_device *net)
 	dhd_cleanup_if(net);
 }
 
-struct net_device * dhd_cfg80211_netdev_free(struct net_device *ndev)
+static struct net_device *dhd_cfg80211_netdev_free(struct net_device *ndev)
 {
 	struct bcm_cfg80211 *cfg;
 
 	if (ndev) {
 		cfg = wl_get_cfg(ndev);
 		if (ndev->ieee80211_ptr) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+			wl_cfg80211_quiesce_wiphy_events(ndev->ieee80211_ptr);
+#endif
 			MFREE(cfg->osh, ndev->ieee80211_ptr, sizeof(struct wireless_dev));
 			ndev->ieee80211_ptr = NULL;
 		}

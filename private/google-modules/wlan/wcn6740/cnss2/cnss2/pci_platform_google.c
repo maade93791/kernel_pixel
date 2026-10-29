@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2021, The Linux Foundation. All rights reserved. */
 
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/of_reserved_mem.h>
@@ -297,75 +298,94 @@ int cnss_pci_of_reserved_mem_device_init(struct cnss_pci_data *pci_priv)
 
 #define DEVICE_NAME "wlan"
 
-static struct sscd_platform_data sscd_pdata;
+static DEFINE_MUTEX(sscd_lock);
+static struct platform_device *sscd_dev;
+static char *crash_info;
 
-static struct platform_device sscd_dev = {
-	.name            = DEVICE_NAME,
-	.driver_override = SSCD_NAME,
-	.id              = -1,
-	.dev             = {
-		.platform_data = &sscd_pdata,
-		.release       = sscd_release,
-    },
-};
-
-void cnss_register_sscd(void)
+int cnss_register_sscd(void)
 {
-	memset(&sscd_pdata, 0, sizeof(struct sscd_platform_data));
-	memset(&sscd_dev, 0, sizeof(struct platform_device));
-	sscd_dev.name = DEVICE_NAME;
-	sscd_dev.driver_override = SSCD_NAME;
-	sscd_dev.id = -1;
-	sscd_dev.dev.platform_data = &sscd_pdata;
-	sscd_dev.dev.release = sscd_release;
-	platform_device_register(&sscd_dev);
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
+
+	mutex_lock(&sscd_lock);
+	if (sscd_dev) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	pdev = platform_device_alloc(DEVICE_NAME, PLATFORM_DEVID_NONE);
+	if (!pdev) {
+		ret = -ENOMEM;
+		goto unlock;
+	}
+	pdev->dev.init_name = DEVICE_NAME;
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	sscd_dev = pdev;
+	goto unlock;
+
+put_device:
+	platform_device_put(pdev);
+unlock:
+	mutex_unlock(&sscd_lock);
+	return ret;
 }
 
 void cnss_unregister_sscd(void)
 {
-	platform_device_unregister(&sscd_dev);
+	mutex_lock(&sscd_lock);
+	if (sscd_dev) {
+		platform_device_unregister(sscd_dev);
+		sscd_dev = NULL;
+	}
+	kfree(crash_info);
+	crash_info = NULL;
+	mutex_unlock(&sscd_lock);
 }
 
-void sscd_release(struct device *dev)
-{
-	cnss_pr_info("%s: enter\n", __FUNCTION__);
-}
-
-u8 *crash_info = 0;
 void sscd_set_coredump(void *buf, int buf_len)
 {
-	struct sscd_platform_data *pdata = dev_get_platdata(&sscd_dev.dev);
-	struct sscd_segment seg;
+	struct sscd_platform_data *pdata;
+	struct sscd_segment seg = {};
 
+	/* Keep the provider-mutated platform data alive through the full report. */
+	mutex_lock(&sscd_lock);
+	if (!sscd_dev)
+		goto unlock;
+	pdata = dev_get_platdata(&sscd_dev->dev);
 	if (pdata->sscd_report) {
-		memset(&seg, 0, sizeof(seg));
 		seg.addr = buf;
 		seg.size = buf_len;
-		if(crash_info) {
-			pdata->sscd_report(&sscd_dev, &seg, 1, 0, crash_info);
-			kfree(crash_info);
-			crash_info = 0;
-		} else {
-			pdata->sscd_report(&sscd_dev, &seg, 1, 0, "Unknown");
-		}
+		pdata->sscd_report(sscd_dev, &seg, 1, 0,
+				  crash_info ? crash_info : "Unknown");
+		kfree(crash_info);
+		crash_info = NULL;
 	}
+unlock:
+	mutex_unlock(&sscd_lock);
 }
 
 void crash_info_handler(u8 *info)
 {
-	u32 string_len = 0;
+	char *copy = kstrdup((char *)info, GFP_KERNEL);
 
-	if (crash_info) {
+	mutex_lock(&sscd_lock);
+	if (sscd_dev) {
 		kfree(crash_info);
-		crash_info = 0;
+		crash_info = copy;
+	} else {
+		kfree(copy);
 	}
-
-	string_len = strlen(info);
-	crash_info = kzalloc(string_len + 1, GFP_KERNEL);
-	if (!crash_info)
-		return;
-	strncpy(crash_info, info, string_len);
-	crash_info[string_len] = '\0';
+	mutex_unlock(&sscd_lock);
 }
 
 static void

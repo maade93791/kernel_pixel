@@ -244,12 +244,33 @@ bool wl_cfg80211_is_oce_ap(struct wiphy *wiphy, const u8 *bssid_hint)
 #endif /* WL_FW_OCE_AP_SELECT */
 
 s32
-wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+wl_cfgvif_del_if_locked(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 	struct wireless_dev *wdev, char *ifname)
 {
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	struct net_device *target = wdev ? wdev->netdev : NULL;
+	bool close_target = true;
 	int ret = BCME_OK;
 	struct net_info *iter, *next;
 	bool active_iface = FALSE;
+
+	ASSERT_RTNL();
+	lockdep_assert_wiphy(wiphy);
+	if (!target && ifname)
+		target = wl_get_netdev_by_name(cfg, ifname);
+#ifdef WL_STATIC_IF
+	/* Static close only removes its firmware interface; avoid ndo_stop recursion. */
+	if (target && (IS_CFG80211_STATIC_IF(cfg, target) || IS_NMI_IFACE(target->name)))
+		close_target = false;
+#endif
+	if (target && close_target && (target->flags & IFF_UP)) {
+		/* NETDEV_GOING_DOWN/DOWN acquire wiphy themselves. */
+		dev_hold(target);
+		wiphy_unlock(wiphy);
+		dev_close(target);
+		wiphy_lock(wiphy);
+		dev_put(target);
+	}
 
 	mutex_lock(&cfg->if_sync);
 	ret = _wl_cfg80211_del_if(cfg, primary_ndev, wdev, ifname);
@@ -283,10 +304,27 @@ wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
 
 		if (active_iface == FALSE) {
 			WL_INFORM(("Calling dhd_stop as all interfaces are down\n"));
+			wiphy_unlock(wiphy);
 			dhd_stop(primary_ndev);
+			wiphy_lock(wiphy);
 		}
 	}
 
+	return ret;
+}
+
+/* Android IOCTL and static ndo_stop callers own RTNL, but not wiphy. */
+s32
+wl_cfgvif_del_if(struct bcm_cfg80211 *cfg, struct net_device *primary_ndev,
+	struct wireless_dev *wdev, char *ifname)
+{
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	int ret;
+
+	ASSERT_RTNL();
+	wiphy_lock(wiphy);
+	ret = wl_cfgvif_del_if_locked(cfg, primary_ndev, wdev, ifname);
+	wiphy_unlock(wiphy);
 	return ret;
 }
 
@@ -410,11 +448,23 @@ wl_cfgvif_delayed_remove_iface_work(struct work_struct *work)
 {
 	struct bcm_cfg80211 *cfg = NULL;
 	struct net_device *ndev;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct wiphy *wiphy;
+	dhd_pub_t *dhdp;
+#endif
 
 	BCM_SET_CONTAINER_OF(cfg, work, struct bcm_cfg80211, remove_iface_work.work);
 
 	if (cfg->if_event_info.ifidx) {
 		ndev = bcmcfg_to_prmry_ndev(cfg);
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		dhdp = cfg->pub;
+		wiphy = dhd_netdev_lifecycle_lock(dhdp, cfg->if_event_info.ifidx);
+		if (IS_ERR(wiphy))
+			return;
+		wl_cfg80211_remove_if(cfg, cfg->if_event_info.ifidx, ndev, FALSE);
+		dhd_netdev_lifecycle_unlock(dhdp, wiphy);
+#else
 
 #ifdef BCMDONGLEHOST
 		dhd_net_if_lock(ndev);
@@ -427,6 +477,7 @@ wl_cfgvif_delayed_remove_iface_work(struct work_struct *work)
 #ifdef BCMDONGLEHOST
 		dhd_net_if_unlock(ndev);
 #endif /* BCMDONGLEHOST */
+#endif /* native lifecycle ownership */
 	}
 	return;
 }
@@ -912,7 +963,7 @@ wl_cfg80211_handle_discovery_config(struct bcm_cfg80211 *cfg,
 	if (disable_nan) {
 #ifdef WL_NAN
 		/* Disable nan to avoid conflict with p2p */
-		ret = wl_cfgnan_check_nan_disable_pending(cfg, true, true);
+		ret = wl_cfgnan_check_nan_disable_pending(cfg, true);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to disable nan, error[%d]\n", ret));
 			return ret;
@@ -1169,7 +1220,7 @@ wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,
 		return ERR_PTR(-EINVAL);
 	}
 
-	wdev = wl_cfg80211_add_if(cfg, primary_ndev, wl_iftype, name, NULL);
+	wdev = wl_cfg80211_add_if_locked(cfg, primary_ndev, wl_iftype, name, NULL);
 	if (unlikely(!wdev)) {
 		return ERR_PTR(-ENODEV);
 	}
@@ -1231,10 +1282,10 @@ wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 #endif /* WL_NAN */
 		dhd_set_del_in_progress(dhdp, ndev);
 	}
-	if ((ret = wl_cfgvif_del_if(cfg, primary_ndev,
-			wdev, NULL)) < 0) {
+	ret = wl_cfgvif_del_if_locked(cfg, primary_ndev, wdev, NULL);
+	if (ret < 0)
 		WL_ERR(("IF del failed\n"));
-	}
+
 	if (ndev) {
 		dhd_clear_del_in_progress(dhdp, ndev);
 	}
@@ -1387,6 +1438,9 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 	}
 
 	mutex_lock(&cfg->if_sync);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(ndev->ieee80211_ptr);
+#endif
 
 	netinfo = wl_get_netinfo_by_wdev(cfg, ndev->ieee80211_ptr);
 	if (!netinfo) {
@@ -1588,6 +1642,57 @@ exit:
 void
 wl_cfg80211_cleanup_virtual_ifaces(struct bcm_cfg80211 *cfg, bool rtnl_lock_reqd)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	struct net_device *targets[WL_MAX_IFS + DHD_MAX_STATIC_IFS];
+	struct net_info *iter, *next;
+	struct net_device *primary_ndev = bcmcfg_to_prmry_ndev(cfg);
+	unsigned int count = 0, i;
+
+	/* Caller owns RTNL; ndo_stop must run without wiphy/private mutexes. */
+	ASSERT_RTNL();
+	BCM_REFERENCE(rtnl_lock_reqd);
+	wiphy_lock(bcmcfg_to_wiphy(cfg));
+	mutex_lock(&cfg->if_sync);
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
+	for_each_ndev(cfg, iter, next) {
+		GCC_DIAGNOSTIC_POP();
+		if (!iter->ndev || iter->ndev == primary_ndev)
+			continue;
+#ifdef WL_STATIC_IF
+		if (IS_CFG80211_STATIC_IF(cfg, iter->ndev) &&
+		    IS_NMI_IFACE(iter->ndev->name))
+			continue;
+#endif
+		/* Every host netdev has a real firmware or persistent static slot. */
+		if (WARN_ON_ONCE(count == ARRAY_SIZE(targets)))
+			break;
+		dev_hold(iter->ndev);
+		targets[count++] = iter->ndev;
+	}
+	mutex_unlock(&cfg->if_sync);
+	wiphy_unlock(bcmcfg_to_wiphy(cfg));
+
+	for (i = 0; i < count; i++) {
+		struct net_device *ndev = targets[i];
+
+		WL_INFORM(("Cleaning up iface:%s\n", ndev->name));
+		if (ndev->flags & IFF_UP)
+			dev_close(ndev);
+#if defined(WLAN_ACCEL_BOOT)
+		WL_ERR(("Setting forced reg_on to ensure clearing interface states in FW\n"));
+		dhd_dev_set_accel_force_reg_on(ndev);
+#endif
+		wiphy_lock(bcmcfg_to_wiphy(cfg));
+		mutex_lock(&cfg->if_sync);
+		/* Static ndo_stop may already have removed its firmware net_info. */
+		if (ndev->ieee80211_ptr &&
+		    wl_get_netinfo_by_wdev(cfg, ndev->ieee80211_ptr))
+			_wl_cfg80211_post_ifdel(ndev, false, 0);
+		mutex_unlock(&cfg->if_sync);
+		wiphy_unlock(bcmcfg_to_wiphy(cfg));
+		dev_put(ndev);
+	}
+#else
 	struct net_info *iter, *next;
 	struct net_device *primary_ndev;
 
@@ -1634,6 +1739,7 @@ wl_cfg80211_cleanup_virtual_ifaces(struct bcm_cfg80211 *cfg, bool rtnl_lock_reqd
 			}
 		}
 	}
+#endif
 }
 
 int
@@ -4587,6 +4693,9 @@ wl_cfg80211_start_ap(
 	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
 #endif /* BCMDONGLEHOST */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+#endif
 	WL_DBG(("Enter \n"));
 
 	if ((bssidx = wl_get_bssidx_by_wdev(cfg, dev->ieee80211_ptr)) < 0) {
@@ -4838,14 +4947,25 @@ wl_cfg80211_stop_ap(
 		return (-ENODEV);
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	/* Serialize cache invalidation and cancellation with FW CSA production. */
+	mutex_lock(&cfg->if_sync);
+#endif
 	wl_clr_drv_status(cfg, AP_CREATING, dev);
 	wl_clr_drv_status(cfg, AP_BSS_UP_IN_PROG, dev);
 	wl_clr_drv_status(cfg, AP_CREATED, dev);
 	netinfo = wl_get_netinfo_by_wdev(cfg, dev->ieee80211_ptr);
 	if (!netinfo) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		mutex_unlock(&cfg->if_sync);
+#endif
 		return (-ENODEV);
 	}
 	netinfo->ap_chanspec = INVCHANSPEC;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	wl_cfg80211_invalidate_wiphy_events(dev->ieee80211_ptr);
+	mutex_unlock(&cfg->if_sync);
+#endif
 
 	if (dev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
 		dev_role = NL80211_IFTYPE_AP;
@@ -5908,7 +6028,7 @@ wl_notify_connect_status_ap(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 		sinfo.assoc_req_ies_len = len;
 		WL_INFORM_MEM(("[%s] new sta event for "MACDBG "\n",
 			ndev->name, MAC2STRDBG(e->addr.octet)));
-		cfg80211_new_sta(ndev, e->addr.octet, &sinfo, GFP_ATOMIC);
+		cfg80211_new_sta(ndev->ieee80211_ptr, e->addr.octet, &sinfo, GFP_ATOMIC);
 #ifdef WL_WPS_SYNC
 		wl_wps_session_update(ndev, WPS_STATE_LINKUP, e->addr.octet);
 #endif /* WL_WPS_SYNC */
@@ -5925,7 +6045,7 @@ wl_notify_connect_status_ap(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 
 		WL_INFORM_MEM(("[%s] del sta event for "MACDBG "\n",
 			ndev->name, MAC2STRDBG(e->addr.octet)));
-		cfg80211_del_sta(ndev, e->addr.octet, GFP_ATOMIC);
+		cfg80211_del_sta(ndev->ieee80211_ptr, e->addr.octet, GFP_ATOMIC);
 #ifdef WL_WPS_SYNC
 		wl_wps_session_update(ndev, WPS_STATE_LINKDOWN, e->addr.octet);
 #endif /* WL_WPS_SYNC */
@@ -6682,7 +6802,18 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec,
 	}
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))
 	freq = chandef.chan ? chandef.chan->center_freq : chandef.center_freq1;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+	{
+		int err;
+
+		err = wl_cfg80211_queue_ch_switch_event(wiphy_priv(wiphy), dev->ieee80211_ptr,
+			&chandef, link_id);
+		if (err) {
+			WL_ERR(("Channel switch notification queue failed: %d\n", err));
+			return;
+		}
+	}
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0))
 	cfg80211_ch_switch_notify(dev, &chandef, 0);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) || defined(WL_CH_SWITCH_BKPORT)
 	/* FIXME: need to consider puncturing bitmap */
@@ -9456,7 +9587,7 @@ wl_cfgvif_apply_default_keep_alive(struct net_device *ndev, struct bcm_cfg80211 
 	str = "mkeep_alive";
 	str_len = strlen(str);
 	buf_len = str_len + 1;
-	strlcpy(buf, str, buf_len);
+	strscpy(buf, str, buf_len);
 	pbuf_len -= buf_len;
 
 	if (sizeof(wl_mkeep_alive_pkt_v2_t) + buf_len > WLC_IOCTL_SMLEN) {

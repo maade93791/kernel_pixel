@@ -277,7 +277,7 @@ typedef enum {
 typedef struct {
     uint16 tag;
     uint16 len; /* length of value */
-    uint8 value[0];
+	uint8 value[];
 } tlv_log;
 
 typedef struct per_packet_status_entry {
@@ -328,7 +328,7 @@ typedef struct per_packet_status_entry {
 #if defined(LINUX)
 typedef struct log_conn_event {
     uint16 event;
-    tlv_log tlvs[0];
+	tlv_log tlvs[];
 	/*
 	* separate parameter structure per event to be provided and optional data
 	* the event_data is expected to include an official android part, with some
@@ -942,4 +942,8 @@ typedef struct _pr_roam_tbl {
 
 extern uint32 dhd_dbg_get_fwverbose(dhd_pub_t *dhdp);
 extern void dhd_dbg_set_fwverbose(dhd_pub_t *dhdp, uint32 new_val);
+#if defined(DBG_PKT_MON) || defined(DHD_PKT_LOGGING)
+wifi_tx_packet_fate __dhd_dbg_map_tx_status_to_pkt_fate(uint16 status);
+#endif
+
 #endif /* _dhd_debug_h_ */
