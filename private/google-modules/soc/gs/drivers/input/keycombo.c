@@ -213,10 +213,16 @@ static int keycombo_probe(struct platform_device *pdev)
 		state->key_up_fn = pdata->key_up_fn;
 	INIT_WORK(&state->key_up_work, do_key_up);
 
-	state->combo_held_wake_source = wakeup_source_create("key combo");
-	state->combo_up_wake_source = wakeup_source_create("key combo up");
-	wakeup_source_add(state->combo_held_wake_source);
-	wakeup_source_add(state->combo_up_wake_source);
+	state->combo_held_wake_source = wakeup_source_register(&pdev->dev, "key combo");
+	if (!state->combo_held_wake_source) {
+		ret = -ENOMEM;
+		goto err_wakeup_sources;
+	}
+	state->combo_up_wake_source = wakeup_source_register(&pdev->dev, "key combo up");
+	if (!state->combo_up_wake_source) {
+		ret = -ENOMEM;
+		goto err_wakeup_sources;
+	}
 	state->delay = msecs_to_jiffies(pdata->key_down_delay);
 
 	state->input_handler.event = keycombo_event;
@@ -225,23 +231,29 @@ static int keycombo_probe(struct platform_device *pdev)
 	state->input_handler.name = KEYCOMBO_NAME;
 	state->input_handler.id_table = keycombo_ids;
 	ret = input_register_handler(&state->input_handler);
-	if (ret) {
-		kfree(state);
-		return ret;
-	}
+	if (ret)
+		goto err_wakeup_sources;
 	platform_set_drvdata(pdev, state);
 	return 0;
+
+err_wakeup_sources:
+	cancel_delayed_work_sync(&state->key_down_work);
+	destroy_workqueue(state->wq);
+	wakeup_source_unregister(state->combo_up_wake_source);
+	wakeup_source_unregister(state->combo_held_wake_source);
+	kfree(state);
+	return ret;
 }
 
-int keycombo_remove(struct platform_device *pdev)
+static void keycombo_remove(struct platform_device *pdev)
 {
 	struct keycombo_state *state = platform_get_drvdata(pdev);
 	input_unregister_handler(&state->input_handler);
-	wakeup_source_destroy(state->combo_held_wake_source);
-	wakeup_source_destroy(state->combo_up_wake_source);
+	cancel_delayed_work_sync(&state->key_down_work);
 	destroy_workqueue(state->wq);
+	wakeup_source_unregister(state->combo_held_wake_source);
+	wakeup_source_unregister(state->combo_up_wake_source);
 	kfree(state);
-	return 0;
 }
 
 

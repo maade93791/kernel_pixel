@@ -17,6 +17,12 @@
 #include <linux/types.h>
 #include "stmvl53l1.h"
 
+struct pinctrl;
+
+bool is_shared_i2c_with_stmvl53l1(struct pinctrl *pinctrl);
+int shared_i2c_set_state(struct device *dev, struct pinctrl *pinctrl,
+			 const char *state_str);
+
 struct i2c_data {
 	struct i2c_client *client;
 	/** back link to driver for interrupt and clean-up */
