@@ -36,6 +36,8 @@
 #include <linux/kthread.h>
 #include <linux/random.h>
 #include <linux/irqdomain.h>
+#include <linux/irqchip/irq-msi-lib.h>
+#include <linux/pinctrl/consumer.h>
 
 #include <soc/google/exynos-pm.h>
 #if IS_ENABLED(CONFIG_CPU_IDLE)
@@ -72,6 +74,7 @@ static struct separated_msi_vector sep_msi_vec[MAX_RC_NUM][PCIE_MAX_SEPA_IRQ_NUM
 static bool is_vhook_registered;
 
 static struct pci_dev *exynos_pcie_get_pci_dev(struct dw_pcie_rp *pp);
+static int exynos_pcie_rc_msi_host_init(struct dw_pcie_rp *pp);
 
 #define LINK_L11_ENABLE (PCI_L1SS_CAP_PCIPM_L1_1 | PCI_L1SS_CAP_ASPM_L1_1)
 #define LINK_L12_ENABLE (PCI_L1SS_CAP_PCIPM_L1_2 | PCI_L1SS_CAP_ASPM_L1_2)
@@ -1772,7 +1775,7 @@ int exynos_pcie_rc_set_outbound_atu(int ch_num, u32 target_addr, u32 offset, u32
 }
 EXPORT_SYMBOL_GPL(exynos_pcie_rc_set_outbound_atu);
 
-static int exynos_pcie_rc_link_up(struct dw_pcie *pci)
+static bool exynos_pcie_rc_link_up(struct dw_pcie *pci)
 {
 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pci);
 	u32 val;
@@ -2350,7 +2353,7 @@ static int exynos_pcie_rc_get_pin_state(struct platform_device *pdev,
 	struct device_node *np = dev->of_node;
 	int ret;
 
-	exynos_pcie->perst_gpio = of_get_gpio(np, 0);
+	exynos_pcie->perst_gpio = of_get_named_gpio(np, "gpios", 0);
 	if (exynos_pcie->perst_gpio < 0) {
 		dev_err(&pdev->dev, "cannot get perst_gpio\n");
 	} else {
@@ -3234,13 +3237,12 @@ static int exynos_pcie_rc_init(struct dw_pcie_rp *pp)
 	/* Setup RC to avoid initialization faile in PCIe stack */
 	pp->bridge->ops = &exynos_pcie_rc_root_ops;
 	pp->bridge->child_ops = &exynos_pcie_rc_child_ops;
-	dw_pcie_setup_rc(pp);
-
 	return 0;
 }
 
 static struct dw_pcie_host_ops exynos_pcie_rc_ops = {
-	.host_init = exynos_pcie_rc_init,
+	.init = exynos_pcie_rc_init,
+	.msi_init = exynos_pcie_rc_msi_host_init,
 };
 
 void exynos_pcie_msi_post_process(struct dw_pcie_rp *pp)
@@ -4915,15 +4917,16 @@ EXPORT_SYMBOL_GPL(exynos_pcie_rc_set_affinity);
 int exynos_pcie_rc_set_enable_wake(struct irq_data *data, unsigned int enable)
 {
 	int ret = 0;
-	struct dw_pcie_rp *pp = data->parent_data->domain->host_data;
-	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+	struct dw_pcie_rp *pp;
+	struct dw_pcie *pci;
 
-	dev_dbg(pci->dev, "%s: enable = %d\n", __func__, enable);
-
-	if (pp == NULL) {
+	if (!data->parent_data || !data->parent_data->chip_data) {
 		pr_err("Warning: exynos_pcie_rc_set_enable_wake: not exist pp\n");
 		return -EINVAL;
 	}
+	pp = data->parent_data->chip_data;
+	pci = to_dw_pcie_from_pp(pp);
+	dev_dbg(pci->dev, "%s: enable = %d\n", __func__, enable);
 
 	if (enable)
 		ret = enable_irq_wake(pp->irq);
@@ -5005,9 +5008,53 @@ static int exynos_pcie_msi_set_affinity(struct irq_data *irq_data, const struct 
 	if (!idata || !idata->chip)
 		return -ENODEV;
 
-	if (idata->chip->irq_set_affinity)
-		idata->chip->irq_set_affinity(idata, mask, force);
+	if (!idata->chip->irq_set_affinity)
+		return -EINVAL;
 
+	return idata->chip->irq_set_affinity(idata, mask, force);
+}
+
+static bool exynos_pcie_init_dev_msi_info(struct device *dev, struct irq_domain *domain,
+					struct irq_domain *real_parent,
+					struct msi_domain_info *info)
+{
+	struct dw_pcie_rp *pp = real_parent->host_data;
+	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pci);
+
+	if (!msi_lib_init_dev_msi_info(dev, domain, real_parent, info))
+		return false;
+
+	info->chip->irq_set_affinity = exynos_pcie_msi_set_affinity;
+	info->chip->irq_set_wake = exynos_pcie_rc_set_enable_wake;
+	if (exynos_pcie->ep_device_type == EP_QC_WIFI ||
+	    exynos_pcie->ep_device_type == EP_SAMSUNG_MODEM) {
+		info->chip->irq_mask = pci_msi_mask_irq;
+		info->chip->irq_unmask = pci_msi_unmask_irq;
+	}
+	return true;
+}
+
+static int exynos_pcie_rc_msi_host_init(struct dw_pcie_rp *pp)
+{
+	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pci);
+	struct device_node *np = pci->dev->of_node;
+	int ret;
+
+	/* Preserve the generic path for an external MSI controller. */
+	if (of_property_present(np, "msi-parent") || of_property_present(np, "msi-map"))
+		return 0;
+
+	ret = dw_pcie_msi_host_init(pp);
+	if (ret)
+		return ret;
+
+	/* This callback still uses the DesignWare controller and its cleanup. */
+	pp->has_msi_ctrl = true;
+	exynos_pcie->msi_parent_ops = *pp->irq_domain->msi_parent_ops;
+	exynos_pcie->msi_parent_ops.init_dev_msi_info = exynos_pcie_init_dev_msi_info;
+	pp->irq_domain->msi_parent_ops = &exynos_pcie->msi_parent_ops;
 	return 0;
 }
 
@@ -5271,8 +5318,6 @@ EXPORT_SYMBOL_GPL(register_separated_msi_vector);
 
 static int exynos_pcie_rc_add_port(struct platform_device *pdev, struct dw_pcie_rp *pp, int ch_num)
 {
-	struct irq_domain *msi_domain;
-	struct msi_domain_info *msi_domain_info;
 	int ret, i, sep_irq;
 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pci);
@@ -5351,18 +5396,6 @@ skip_sep_request_irq:
 		dev_err(&pdev->dev, "failed to dw pcie host init\n");
 
 		return ret;
-	}
-
-	if (pp->msi_domain) {
-		msi_domain = pp->msi_domain;
-		msi_domain_info = (struct msi_domain_info *)msi_domain->host_data;
-		msi_domain_info->chip->irq_set_affinity = exynos_pcie_msi_set_affinity;
-		msi_domain_info->chip->irq_set_wake = exynos_pcie_rc_set_enable_wake;
-		if (exynos_pcie->ep_device_type == EP_QC_WIFI ||
-				exynos_pcie->ep_device_type == EP_SAMSUNG_MODEM) {
-			msi_domain_info->chip->irq_mask = pci_msi_mask_irq;
-			msi_domain_info->chip->irq_unmask = pci_msi_unmask_irq;
-		}
 	}
 
 	return 0;
@@ -5802,19 +5835,15 @@ probe_fail:
 	return ret;
 }
 
-static int __exit exynos_pcie_rc_remove(struct platform_device *pdev)
+static void exynos_pcie_rc_remove(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct dw_pcie *pci = container_of(&dev, struct dw_pcie, dev);
-	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pci);
+	struct exynos_pcie *exynos_pcie = platform_get_drvdata(pdev);
 
 	dev_info(&pdev->dev, "%s\n", __func__);
 
 	cancel_delayed_work_sync(&exynos_pcie->cfg_access_work);
 
 	mutex_destroy(&exynos_pcie->power_onoff_lock);
-
-	return 0;
 }
 
 #if IS_ENABLED(CONFIG_PM)
