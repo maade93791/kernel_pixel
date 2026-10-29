@@ -27,6 +27,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/netdevice.h>
+#include <net/mcps802154_frame.h>
 #include <net/rtnetlink.h>
 
 #include "mcps802154_i.h"
@@ -284,7 +285,7 @@ struct mcps802154_local *mcps802154_get_first_by_idx(int hw_idx)
 	return result;
 }
 
-int __init mcps802154_init(void)
+static int __init mcps802154_init(void)
 {
 	int r;
 
@@ -305,7 +306,7 @@ int __init mcps802154_init(void)
 	return r;
 }
 
-void __exit mcps802154_exit(void)
+static void __exit mcps802154_exit(void)
 {
 	mcps802154_on_demand_scheduler_exit();
 	mcps802154_default_scheduler_exit();

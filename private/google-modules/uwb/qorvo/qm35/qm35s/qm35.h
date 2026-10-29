@@ -87,13 +87,19 @@ static inline void qm35_set_state(struct qm35_ctx *qm35_hdl, int state)
 static inline int qm35_reset(struct qm35_ctx *qm35_hdl, int timeout_ms,
 			     bool run)
 {
+	int ret;
+
 	if (qm35_hdl->gpio_reset) {
 		qm35_set_state(qm35_hdl, QM35_CTRL_STATE_RESET);
-		gpiod_set_value(qm35_hdl->gpio_reset, 1);
+		ret = gpiod_set_value_cansleep(qm35_hdl->gpio_reset, 1);
+		if (ret)
+			return ret;
 		if (!run)
 			return 0;
 		usleep_range(timeout_ms * 1000UL, timeout_ms * 1000UL);
-		gpiod_set_value(qm35_hdl->gpio_reset, 0);
+		ret = gpiod_set_value_cansleep(qm35_hdl->gpio_reset, 0);
+		if (ret)
+			return ret;
 		qm35_set_state(qm35_hdl, QM35_CTRL_STATE_UNKNOWN);
 		return 0;
 	}

@@ -18,7 +18,7 @@ struct sscd_info {
 struct sscd_desc {
 	struct sscd_info sscd_info;
 	struct sscd_platform_data sscd_pdata;
-	struct platform_device sscd_dev;
+	struct platform_device *sscd_dev;
 };
 
 int qm35_report_coredump(struct qm35_ctx *qm35_ctx);

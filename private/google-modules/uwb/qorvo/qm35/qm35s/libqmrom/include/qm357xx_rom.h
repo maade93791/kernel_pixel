@@ -86,6 +86,10 @@ int qm357xx_rom_flash_fw(struct qmrom_handle *handle,
 int qm357xx_rom_flash_unstitched_fw(struct qmrom_handle *handle,
 				    const struct unstitched_firmware *fw);
 
+int qm357xx_rom_probe_device(struct qmrom_handle *handle);
+int qm357xx_rom_b0_probe_device(struct qmrom_handle *handle);
+int qm357xx_rom_c0_probe_device(struct qmrom_handle *handle);
+
 int qm357xx_rom_write_cmd(struct qmrom_handle *handle, uint8_t cmd);
 int qm357xx_rom_write_cmd32(struct qmrom_handle *handle, uint32_t cmd);
 int qm357xx_rom_write_size_cmd(struct qmrom_handle *handle, uint8_t cmd,
