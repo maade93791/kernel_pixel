@@ -17,6 +17,7 @@
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/cpufreq.h>
+#include <linux/sched/topology.h>
 #include <linux/tick.h>
 #include <linux/pm_opp.h>
 #include <linux/suspend.h>
@@ -30,6 +31,7 @@
 #include <trace/hooks/systrace.h>
 
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 
 #include "exynos-acme.h"
 #if IS_ENABLED(CONFIG_SOC_ZUMA)
@@ -206,7 +208,7 @@ static void apply_thermal_pressure(struct exynos_cpufreq_domain *domain,
 	spin_lock(&domain->thermal_update_lock);
 	domain->capped_freq[thermal_actor] = capped_freq;
 	arch_capped_freq = min(domain->capped_freq[TJ], domain->capped_freq[TSKIN]);
-	arch_update_thermal_pressure(maskp, arch_capped_freq);
+	arch_update_hw_pressure(maskp, arch_capped_freq);
 	spin_unlock(&domain->thermal_update_lock);
 
 	if (unlikely(trace_clock_set_rate_enabled()))
@@ -365,7 +367,7 @@ static int exynos_cpufreq_verify(struct cpufreq_policy_data *new_policy)
 				 domain->min_freq_qos,
 				 domain->max_freq_qos);
 
-	ret = cpufreq_frequency_table_verify(new_policy, domain->freq_table);
+	ret = cpufreq_frequency_table_verify(new_policy);
 	if (!ret)
 		apply_thermal_pressure(domain, new_policy->max, TSKIN);
 
@@ -548,7 +550,6 @@ static struct cpufreq_driver exynos_driver = {
 	.offline	= exynos_cpufreq_offline,
 	.suspend	= exynos_cpufreq_suspend,
 	.resume		= exynos_cpufreq_resume,
-	.attr		= cpufreq_generic_attr,
 };
 
 /*********************************************************************
@@ -922,10 +923,16 @@ static int dm_scaler(int dm_type, void *devdata, unsigned int target_freq,
 	}
 
 
-	target_index = cpufreq_frequency_table_target(policy, target_freq, relation);
+	target_index = cpufreq_frequency_table_target(policy, target_freq,
+						     policy->min, policy->max, relation);
+	if (target_index < 0) {
+		ret = target_index;
+		goto put_policy;
+	}
 	target_freq = policy->freq_table[target_index].frequency;
 	ret = __exynos_cpufreq_target(policy, target_freq);
 
+put_policy:
 	cpufreq_cpu_put(policy);
 
 	return ret;
