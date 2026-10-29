@@ -31,12 +31,14 @@
 #include <soc/google/bts.h>
 #include <linux/of_platform.h>
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 #include <trace/hooks/systrace.h>
 #include <dt-bindings/soc/google/gs101-devfreq.h>
 #include "../../soc/google/cal-if/acpm_dvfs.h"
 #include <soc/google/exynos-pd.h>
 
 #include <soc/google/exynos-devfreq.h>
+#include <soc/google/exynos-alt.h>
 #include <soc/google/ect_parser.h>
 #include <soc/google/acpm_ipc_ctrl.h>
 #if IS_ENABLED(CONFIG_EXYNOS_DVFS_MANAGER)
@@ -1445,7 +1447,7 @@ static int exynos_devfreq_parse_dt(struct device_node *np,
 	}
 
 	if (of_property_read_u32(np, "dfs_id", &data->dfs_id) &&
-	    of_property_match_string(np, "clock-names", buf))
+	    of_property_match_string(np, "clock-names", "DEVFREQ") < 0)
 		return -ENODEV;
 
 	if (!of_property_read_string(np, "use_get_dev", &use_get_dev)) {
@@ -2058,7 +2060,7 @@ static int exynos_devfreq_resume(struct device *dev)
 	return ret;
 }
 
-ssize_t
+static ssize_t
 user_vote_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -2070,7 +2072,7 @@ user_vote_show(struct device *dev, struct device_attribute *attr, char *buf)
 	return sprintf(buf, "%lu\n", devfreq_cdev->sysfs_req);
 }
 
-ssize_t user_vote_store(struct device *dev, struct device_attribute *attr,
+static ssize_t user_vote_store(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
@@ -2481,7 +2483,7 @@ err_data:
 	return ret;
 }
 
-static int exynos_devfreq_remove(struct platform_device *pdev)
+static void exynos_devfreq_remove(struct platform_device *pdev)
 {
 	struct exynos_devfreq_data *data = platform_get_drvdata(pdev);
 #if IS_ENABLED(CONFIG_EXYNOS_DVFS_MANAGER)
@@ -2524,7 +2526,6 @@ static int exynos_devfreq_remove(struct platform_device *pdev)
 	mutex_destroy(&data->lock);
 	kfree(data);
 
-	return 0;
 }
 
 static struct platform_device_id exynos_devfreq_driver_ids[] = {
