@@ -158,6 +158,8 @@ struct stream_props {
 	struct stream_config *cfg;
 };
 
+struct samsung_sysmmu_domain;
+
 struct sysmmu_drvdata {
 	struct list_head list;
 	struct iommu_device iommu;
@@ -166,6 +168,8 @@ struct sysmmu_drvdata {
 	void __iomem *sfrbase;
 	struct clk *clk;
 	phys_addr_t pgtable[MAX_VIDS];
+	struct samsung_sysmmu_domain *pasid_domains[MAX_VIDS];
+	struct device *pasid_owner[MAX_VIDS];
 	spinlock_t lock; /* protect atomic update to H/W status */
 	u32 version;
 	u32 vmid_mask;
@@ -173,6 +177,7 @@ struct sysmmu_drvdata {
 	int num_pmmu;
 	int qos;
 	int attached_count;
+	int blocked_count;
 	int rpm_count;
 	int secure_irq;
 	unsigned int secure_base;
@@ -187,6 +192,7 @@ struct sysmmu_drvdata {
 };
 
 struct sysmmu_clientdata {
+	struct samsung_sysmmu_domain *domain;
 	struct sysmmu_drvdata **sysmmus;
 	struct device_link **dev_link;
 	int sysmmu_count;

@@ -32,6 +32,8 @@ struct tlb_props {
 	struct tlb_config *cfg;
 };
 
+struct samsung_sysmmu_domain;
+
 struct sysmmu_drvdata {
 	struct list_head list[MAX_VIDS];
 	struct iommu_device iommu;
@@ -45,6 +47,8 @@ struct sysmmu_drvdata {
 	unsigned int num_tlb;
 	int qos;
 	int attached_count[MAX_VIDS];
+	unsigned int blocked_count;
+	struct device *pasid_owner[MAX_VIDS];
 	int secure_irq;
 	unsigned int secure_base;
 	const unsigned int *reg_set;
@@ -62,6 +66,8 @@ struct sysmmu_clientdata {
 	struct sysmmu_drvdata **sysmmus;
 	struct device_link **dev_link;
 	unsigned int sysmmu_count;
+	struct samsung_sysmmu_domain *domain;
+	struct samsung_sysmmu_domain *pasid_domains[MAX_VIDS];
 };
 
 struct sysmmu_groupdata {
