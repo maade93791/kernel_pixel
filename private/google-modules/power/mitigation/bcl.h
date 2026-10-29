@@ -23,6 +23,7 @@
 #include <dt-bindings/soc/google/gs201-bcl.h>
 #endif
 #include <trace/events/power.h>
+#include <trace/events/gs_clock_rate.h>
 #include "uapi/brownout_stats.h"
 
 #if IS_ENABLED(CONFIG_SOC_GS101)
@@ -573,13 +574,10 @@ int max77779_vimon_read(struct bcl_device *bcl_dev);
 int max77759_req_vimon_conv(struct bcl_device *bcl_dev, int idx);
 int max77779_vimon_register_callback(struct bcl_device *bcl_dev);
 
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
 int max77779_adjust_bat_open_to(struct bcl_device *bcl_dev, bool enable);
 int max77779_adjust_batoilo_lvl(struct bcl_device *bcl_dev, u8 lower_enable, u8 set_batoilo1_lvl,
                                 u8 set_batoilo2_lvl);
-#else
 int max77759_adjust_batoilo_lvl(struct bcl_device *bcl_dev, u8 lower_enable, u8 set_batoilo1_lvl);
-#endif
 
 #if IS_ENABLED(CONFIG_REGULATOR_S2MPG14) || IS_ENABLED(CONFIG_REGULATOR_S2MPG12)
 int google_bcl_setup_votable(struct bcl_device *bcl_dev);
@@ -590,5 +588,16 @@ void google_bcl_enable_timer(struct bcl_device *bcl_dev);
 void google_bcl_start_timer(struct bcl_device *bcl_dev);
 void google_bcl_cancel_timer(struct bcl_device *bcl_dev);
 void google_bcl_disable_timer(struct bcl_device *bcl_dev);
+
+void update_irq_start_times(struct bcl_device *bcl_dev, int id);
+void update_irq_end_times(struct bcl_device *bcl_dev, int id);
+void pwrwarn_update_start_time(struct bcl_device *bcl_dev,
+				int id, struct irq_duration_stats *bins,
+				bool *pwr_warn_triggered,
+				enum CONCURRENT_PWRWARN_IRQ bin_ind);
+void pwrwarn_update_end_time(struct bcl_device *bcl_dev, int id,
+				struct irq_duration_stats *bins,
+				enum CONCURRENT_PWRWARN_IRQ bin_ind);
+void trace_bcl_zone_stats(struct bcl_zone *zone, int value);
 
 #endif /* __BCL_H */
