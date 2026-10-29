@@ -9,8 +9,12 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <soc/google/samsung-iommu.h>
+
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
@@ -57,30 +61,61 @@ enum misc_command {
 
 static int bigo_worker_thread(void *data);
 
-static struct sscd_platform_data bigo_sscd_platdata;
+static struct platform_device *bigo_sscd_dev;
+static DEFINE_MUTEX(bigo_sscd_lock);
 
-static void bigo_sscd_release(struct device *dev)
+static int bigo_sscd_register(void)
 {
-	pr_debug("sscd release\n");
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
+
+	pdev = platform_device_alloc(BIGO_CHRDEV_NAME, -1);
+	if (!pdev)
+		return -ENOMEM;
+
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	mutex_lock(&bigo_sscd_lock);
+	ret = platform_device_add(pdev);
+	if (!ret)
+		bigo_sscd_dev = pdev;
+	mutex_unlock(&bigo_sscd_lock);
+	if (ret)
+		goto put_device;
+
+	return 0;
+
+put_device:
+	platform_device_put(pdev);
+	return ret;
 }
 
-static struct platform_device bigo_sscd_dev = {
-	.name            = BIGO_CHRDEV_NAME,
-	.driver_override = SSCD_NAME,
-	.id              = -1,
-	.dev             = {
-		.platform_data = &bigo_sscd_platdata,
-		.release       = bigo_sscd_release,
-	},
-};
+static void bigo_sscd_unregister(void)
+{
+	mutex_lock(&bigo_sscd_lock);
+	if (bigo_sscd_dev) {
+		platform_device_unregister(bigo_sscd_dev);
+		bigo_sscd_dev = NULL;
+	}
+	mutex_unlock(&bigo_sscd_lock);
+}
 
 static void bigo_coredump(struct bigo_core *core, const char *crash_info)
 {
-	struct sscd_platform_data *sscd_platdata = &bigo_sscd_platdata;
+	struct sscd_platform_data *sscd_platdata;
 	struct sscd_segment seg;
 
-	if (!sscd_platdata->sscd_report)
-		return;
+	mutex_lock(&bigo_sscd_lock);
+	sscd_platdata = bigo_sscd_dev ? dev_get_platdata(&bigo_sscd_dev->dev) : NULL;
+	if (!sscd_platdata || !sscd_platdata->sscd_report)
+		goto unlock;
 
 	memset(&seg, 0, sizeof(seg));
 	seg.addr = (void *)core->base;
@@ -89,8 +124,10 @@ static void bigo_coredump(struct bigo_core *core, const char *crash_info)
 	seg.paddr = (void *)core->paddr;
 	seg.vaddr = (void *)core->base;
 
-	sscd_platdata->sscd_report(&bigo_sscd_dev, &seg, 1,
+	sscd_platdata->sscd_report(bigo_sscd_dev, &seg, 1,
 		SSCD_FLAGS_ELFARM64HDR, crash_info);
+unlock:
+	mutex_unlock(&bigo_sscd_lock);
 }
 
 static inline int on_first_instance_open(struct bigo_core *core)
@@ -636,7 +673,7 @@ static int init_chardev(struct bigo_core *core)
 		goto err_cdev_add;
 	}
 
-	core->_class = class_create(THIS_MODULE, BIGO_DEVCLASS_NAME);
+	core->_class = class_create(BIGO_DEVCLASS_NAME);
 	if (IS_ERR(core->_class)) {
 		rc = PTR_ERR(core->_class);
 		goto err_class_create;
@@ -832,7 +869,7 @@ static int bigo_probe(struct platform_device *pdev)
 		goto err_io;
 	}
 
-	rc = iommu_register_device_fault_handler(&pdev->dev, bigo_iommu_fault_handler, core);
+	rc = samsung_iommu_register_fault_handler(&pdev->dev, bigo_iommu_fault_handler, core);
 	if (rc) {
 		pr_err("failed to register iommu fault handler: %d\n", rc);
 		goto err_fault_handler;
@@ -846,7 +883,7 @@ static int bigo_probe(struct platform_device *pdev)
 		rc = 0;
 	}
 
-	if(platform_device_register(&bigo_sscd_dev))
+	if (bigo_sscd_register())
 		pr_warn("Failed to register bigo_sscd_dev.\n");
 
 	bigo_init_debugfs(core);
@@ -859,7 +896,7 @@ static int bigo_probe(struct platform_device *pdev)
 	return rc;
 
 err_pt_client:
-	iommu_unregister_device_fault_handler(&pdev->dev);
+	samsung_iommu_unregister_fault_handler(&pdev->dev);
 err_fault_handler:
 	pm_runtime_disable(&pdev->dev);
 err_io:
@@ -872,19 +909,18 @@ err:
 	return rc;
 }
 
-static int bigo_remove(struct platform_device *pdev)
+static void bigo_remove(struct platform_device *pdev)
 {
 	struct bigo_core *core = (struct bigo_core *)platform_get_drvdata(pdev);
 
+	samsung_iommu_unregister_fault_handler(&pdev->dev);
 	bigo_uninit_debugfs(core);
-	platform_device_unregister(&bigo_sscd_dev);
+	bigo_sscd_unregister();
 	bigo_pt_client_unregister(core);
-	iommu_unregister_device_fault_handler(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 	bigo_of_dt_release(core);
 	deinit_chardev(core);
 	platform_set_drvdata(pdev, NULL);
-	return 0;
 }
 
 static const struct of_device_id bigo_dt_match[] = {
@@ -912,4 +948,4 @@ module_platform_driver(bigo_driver);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Vinay Kalia <vinaykalia@google.com>");
 MODULE_DESCRIPTION("BigWave driver");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
