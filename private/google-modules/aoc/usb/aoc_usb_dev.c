@@ -78,20 +78,9 @@ int usb_host_mode_state_notify(enum aoc_usb_state usb_state)
 	return xhci_sync_conn_stat(0, 0, 0, usb_state);
 }
 
-int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring)
+int xhci_set_isoc_tr_info(struct get_isoc_tr_info_args *tr_info)
 {
-	struct get_isoc_tr_info_args tr_info;
-
-	tr_info.ep_id = ep_id;
-	tr_info.dir = dir;
-	tr_info.num_segs = ep_ring->num_segs;
-	tr_info.max_packet = ep_ring->bounce_buf_len;
-	tr_info.type = ep_ring->type;
-	tr_info.seg_ptr = ep_ring->first_seg->dma;
-	tr_info.cycle_state = ep_ring->cycle_state;
-	tr_info.num_trbs_free = ep_ring->num_trbs_free;
-
-	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_ISOC_TR_INFO, &tr_info);
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_ISOC_TR_INFO, tr_info);
 
 	return 0;
 }
@@ -310,7 +299,7 @@ static int aoc_usb_notify(struct notifier_block *this,
 	return ret;
 }
 
-static int aoc_usb_match(struct device *dev, void *data)
+static int aoc_usb_match(struct device *dev, const void *data)
 {
 	if (sysfs_streq(dev_driver_string(dev), "xhci-hcd-exynos"))
 		return 1;

@@ -350,7 +350,7 @@ static int hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 		hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_interval *channels =
 		hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
-	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct aoc_chip *chip =
 		(struct aoc_chip *)snd_soc_card_get_drvdata(rtd->card);
 	struct snd_card_pdata *pdata =
@@ -505,7 +505,7 @@ static int i2s_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *codec_dai;
-	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 
 	u32 rate, bclk, channel;
 	int i, bit_width, ret;
@@ -554,7 +554,7 @@ static int tdm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *param)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct snd_soc_dai *codec_dai;
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 	u32 rate, bclk, channel, tdmslot;
@@ -1108,7 +1108,7 @@ static int of_parse_dai_cpu(struct device *dev,
 	dai->num_cpus = 1;
 	component->of_node = of_node;
 
-	ret = snd_soc_of_get_dai_name(of_cpu_root, &component->dai_name);
+	ret = snd_soc_of_get_dai_name(of_cpu_root, &component->dai_name, 0);
 	if (ret) {
 		if (ret == -EPROBE_DEFER) {
 			pr_info("%s: wait cpu_dai for %s", __func__, dai->name);
@@ -1147,7 +1147,7 @@ static int of_parse_one_dai(struct device_node *node, struct device *dev,
 	struct snd_soc_dai_link *dai)
 {
 	int ret = 0;
-	bool ops, fixup;
+	bool ops, fixup, playback, capture;
 	u32 trigger, id;
 	struct device_node *daifmt = NULL;
 
@@ -1192,9 +1192,9 @@ static int of_parse_one_dai(struct device_node *node, struct device *dev,
 			dai->trigger[1] = SND_SOC_DPCM_TRIGGER_POST;
 			break;
 		case 2:
-			dai->trigger[0] = SND_SOC_DPCM_TRIGGER_BESPOKE;
-			dai->trigger[1] = SND_SOC_DPCM_TRIGGER_BESPOKE;
-			break;
+			/* AoC has no bespoke trigger callback to replace this mode. */
+			dev_err(dev, "bespoke trigger is unsupported for %s\n", dai->name);
+			return -EINVAL;
 		default:
 			dai->trigger[0] = SND_SOC_DPCM_TRIGGER_PRE;
 			dai->trigger[1] = SND_SOC_DPCM_TRIGGER_PRE;
@@ -1236,10 +1236,16 @@ static int of_parse_one_dai(struct device_node *node, struct device *dev,
 			dai->name);
 	}
 
-	dai->dpcm_playback = of_property_read_bool(node, "playback");
-	dai->dpcm_capture = of_property_read_bool(node, "capture");
+	playback = of_property_read_bool(node, "playback");
+	capture = of_property_read_bool(node, "capture");
 	dai->no_pcm = of_property_read_bool(node, "no-pcm");
 	dai->dynamic = of_property_read_bool(node, "dynamic");
+	if ((dai->dynamic || dai->no_pcm) && !playback && !capture) {
+		dev_err(dev, "no stream direction for %s\n", dai->name);
+		return -EINVAL;
+	}
+	dai->playback_only = playback && !capture;
+	dai->capture_only = capture && !playback;
 	dai->ignore_pmdown_time =
 		!of_property_read_bool(node, "require-pmdown-time");
 	dai->ignore_suspend = !of_property_read_bool(node, "require-suspend");
@@ -1306,8 +1312,8 @@ static int aoc_of_parse_dai_link(struct device_node *node,
 #ifdef DUMP_DAI_LINK_INFO
 		pr_info("dai: %s\n", dai_link->name);
 		pr_info("id: %u\n", (uint32_t)dai_link->id);
-		pr_info("playback %u capture %u\n", dai_link->dpcm_playback,
-			dai_link->dpcm_capture);
+		pr_info("playback_only %u capture_only %u\n", dai_link->playback_only,
+			dai_link->capture_only);
 		pr_info("no-pcm: %u\n", dai_link->no_pcm);
 		pr_info("dynamic: %u\n", dai_link->dynamic);
 		pr_info("\n");
@@ -1771,7 +1777,7 @@ static void init_backend_control(struct snd_soc_pcm_runtime *rtd, u32 id)
 	    !be_res_map[idx].controls)
 		return;
 
-	cpu_dai = asoc_rtd_to_cpu(rtd, 0);
+	cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	snd_soc_add_dai_controls(cpu_dai,
 		 be_res_map[idx].controls, be_res_map[idx].num_controls);
 }
@@ -1977,7 +1983,7 @@ err:
 	return ret;
 }
 
-static int aoc_snd_card_remove(struct platform_device *pdev)
+static void aoc_snd_card_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
 
@@ -1991,7 +1997,6 @@ static int aoc_snd_card_remove(struct platform_device *pdev)
 			wakeup_source_unregister(g_chip->wakelock);
 	}
 
-	return 0;
 }
 
 static const struct of_device_id aoc_snd_of_match[] = {

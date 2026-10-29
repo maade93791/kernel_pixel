@@ -13,6 +13,7 @@
 #define AOC_ALSA_H
 
 #include <linux/device.h>
+#include <linux/uio.h>
 #include <linux/list.h>
 #include <linux/interrupt.h>
 #include <linux/wait.h>
@@ -33,6 +34,7 @@
 
 #include "../aoc-interface.h"
 #include "google-aoc-enum.h"
+#include "aoc_alsa_usb.h"
 #include "usbaudio.h"
 #include "audiometrics.h"
 
@@ -540,10 +542,10 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip);
 
 int aoc_multichannel_processor_switch_set(struct aoc_chip *achip, int value);
 
-int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
-		    uint32_t count);
-int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
-		   uint32_t count);
+int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, struct iov_iter *src,
+		    size_t count);
+int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, struct iov_iter *dest,
+		   size_t count);
 int aoc_audio_volume_set(struct aoc_chip *chip, uint32_t volume,
 			 int src, int dst);
 int aoc_displayport_read(struct aoc_chip *chip, void *dest,
@@ -615,14 +617,6 @@ void aoc_dp_exit(void);
 int aoc_audio_mic_mask_set(struct aoc_chip *chip, bool is_voice);
 
 int aoc_audio_us_record(struct aoc_chip *chip, bool enable);
-
-bool aoc_alsa_usb_callback_register(
-	void (*callback)(struct usb_device *, struct usb_host_endpoint *));
-void aoc_alsa_usb_callback_unregister(void);
-
-void usb_audio_offload_connect(struct snd_usb_audio *chip);
-void usb_audio_offload_disconnect(struct snd_usb_audio *chip);
-void usb_audio_offload_suspend(struct usb_interface *intf, pm_message_t message);
 
 bool aoc_alsa_dp_playback_enabled(void);
 #endif

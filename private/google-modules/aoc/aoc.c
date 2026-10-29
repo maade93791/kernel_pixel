@@ -21,6 +21,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/iommu.h>
+#include <soc/google/samsung-iommu.h>
 #include <linux/jiffies.h>
 #include <linux/list.h>
 #include <linux/module.h>
@@ -78,17 +79,55 @@ struct sscd_info {
 	u16 seg_count;
 };
 
-static void sscd_release(struct device *dev);
-
 static struct sscd_info sscd_info;
-static struct sscd_platform_data sscd_pdata;
-static struct platform_device sscd_dev = { .name = "aoc",
-					   .driver_override = SSCD_NAME,
-					   .id = -1,
-					   .dev = {
-						   .platform_data = &sscd_pdata,
-						   .release = sscd_release,
-					   } };
+static struct sscd_platform_data *sscd_pdata;
+static struct platform_device *sscd_dev;
+static DEFINE_MUTEX(sscd_lock);
+
+static int aoc_sscd_register(void)
+{
+	struct sscd_platform_data pdata = {};
+	struct platform_device *pdev;
+	int ret;
+
+	pdev = platform_device_alloc("aoc", PLATFORM_DEVID_NONE);
+	if (!pdev)
+		return -ENOMEM;
+
+	pdev->dev.init_name = "aoc";
+	ret = platform_device_add_data(pdev, &pdata, sizeof(pdata));
+	if (ret)
+		goto put_device;
+
+	ret = device_set_driver_override(&pdev->dev, SSCD_NAME);
+	if (ret)
+		goto put_device;
+
+	ret = platform_device_add(pdev);
+	if (ret)
+		goto put_device;
+
+	mutex_lock(&sscd_lock);
+	sscd_dev = pdev;
+	sscd_pdata = dev_get_platdata(&pdev->dev);
+	mutex_unlock(&sscd_lock);
+	return 0;
+
+put_device:
+	platform_device_put(pdev);
+	return ret;
+}
+
+static void aoc_sscd_unregister(void)
+{
+	/* Wait for the watchdog's report/retry sequence before freeing its data. */
+	mutex_lock(&sscd_lock);
+	if (sscd_dev)
+		platform_device_unregister(sscd_dev);
+	sscd_dev = NULL;
+	sscd_pdata = NULL;
+	mutex_unlock(&sscd_lock);
+}
 
 static void *aoc_sram_virt_mapping;
 static void *aoc_dram_virt_mapping;
@@ -126,7 +165,7 @@ const static struct dev_pm_ops aoc_core_pm_ops = {
 	.resume = aoc_core_resume,
 };
 
-static int aoc_bus_match(struct device *dev, struct device_driver *drv);
+static int aoc_bus_match(struct device *dev, const struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
 static void aoc_bus_remove(struct device *dev);
 
@@ -203,10 +242,10 @@ bool aoc_fw_ready(void)
 	return aoc_control != NULL && aoc_control->magic == AOC_MAGIC;
 }
 
-static int driver_matches_service_by_name(struct device_driver *drv, void *name)
+static int driver_matches_service_by_name(const struct device_driver *drv,
+					const char *service_name)
 {
-	struct aoc_driver *aoc_drv = AOC_DRIVER(drv);
-	const char *service_name = name;
+	const struct aoc_driver *aoc_drv = container_of_const(drv, struct aoc_driver, drv);
 	const char *const *driver_names = aoc_drv->service_names;
 
 	while (driver_names && *driver_names) {
@@ -219,10 +258,15 @@ static int driver_matches_service_by_name(struct device_driver *drv, void *name)
 	return 0;
 }
 
+static int find_matching_service_driver(struct device_driver *drv, void *name)
+{
+	return driver_matches_service_by_name(drv, name);
+}
+
 static bool has_name_matching_driver(const char *service_name)
 {
 	return bus_for_each_drv(&aoc_bus_type, NULL, (char *)service_name,
-				driver_matches_service_by_name) != 0;
+				find_matching_service_driver) != 0;
 }
 
 static struct aoc_service_dev *service_dev_by_name(struct aoc_prvdata *prv,const char *service_name)
@@ -1076,7 +1120,7 @@ static struct attribute *aoc_attrs[] = {
 ATTRIBUTE_GROUPS(aoc);
 
 static int aoc_platform_probe(struct platform_device *dev);
-static int aoc_platform_remove(struct platform_device *dev);
+static void aoc_platform_remove(struct platform_device *dev);
 static void aoc_platform_shutdown(struct platform_device *dev);
 
 static const struct of_device_id aoc_match[] = {
@@ -1099,9 +1143,9 @@ static struct platform_driver aoc_driver = {
 		},
 };
 
-static int aoc_bus_match(struct device *dev, struct device_driver *drv)
+static int aoc_bus_match(struct device *dev, const struct device_driver *drv)
 {
-	struct aoc_driver *driver = AOC_DRIVER(drv);
+	const struct aoc_driver *driver = container_of_const(drv, struct aoc_driver, drv);
 
 	const char *device_name = dev_name(dev);
 	bool driver_matches_by_name = (driver->service_names != NULL);
@@ -1241,15 +1285,13 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 	return dev;
 }
 
-static int aoc_iommu_fault_handler(struct iommu_fault *fault, void *token)
+static int aoc_iommu_fault_handler(const struct samsung_iommu_fault *fault, void *token)
 {
 	struct device *dev = token;
 
 	dev_err(dev, "aoc iommu fault: fault->type = %u\n", fault->type);
 	dev_err(dev, "fault->event: reason = %u, flags = %#010x, addr = %#010llx\n",
 		fault->event.reason, fault->event.flags, fault->event.addr);
-	dev_err(dev, "fault->prm: flags = %#010x, addr = %#010llx\n",
-		fault->prm.flags, fault->prm.addr);
 
 	/* Tell the IOMMU driver that the fault is non-fatal. */
 	return -EAGAIN;
@@ -1258,10 +1300,10 @@ static int aoc_iommu_fault_handler(struct iommu_fault *fault, void *token)
 static void aoc_configure_iommu_fault_handler(struct aoc_prvdata *p)
 {
 	struct device *dev = p->dev;
-	int rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
+	int rc = devm_samsung_iommu_register_fault_handler(dev, aoc_iommu_fault_handler, dev);
 
 	if (rc)
-		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
+		dev_err(dev, "samsung_iommu_register_fault_handler failed: rc = %d\n", rc);
 }
 
 static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw)
@@ -1300,7 +1342,7 @@ static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw
 		rc = iommu_map(domain, IOMMU_VADDR(iommu[i].value),
 						IOMMU_PADDR(iommu[i].value),
 						IOMMU_SIZE(iommu[i].value),
-						IOMMU_READ | IOMMU_WRITE);
+						IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 		if (rc < 0) {
 			dev_err(
 				dev,
@@ -1721,7 +1763,7 @@ void trigger_aoc_ssr(bool ap_triggered_reset, char *reset_reason) {
 		} else {
 			configure_crash_interrupts(prvdata, false);
 			if (ap_triggered_reset) {
-				strlcpy(prvdata->ap_reset_reason, reset_reason,
+				strscpy(prvdata->ap_reset_reason, reset_reason,
 					AP_RESET_REASON_LENGTH);
 				prvdata->ap_triggered_reset = true;
 			}
@@ -1822,7 +1864,8 @@ static void aoc_watchdog(struct work_struct *work)
 	dev_err(prvdata->dev, "holding %s wakelock for 10 sec\n", ws->name);
 	pm_wakeup_ws_event(ws, 10000, true);
 
-	if (!sscd_pdata.sscd_report) {
+	mutex_lock(&sscd_lock);
+	if (!sscd_pdata || !sscd_pdata->sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
 		goto err_coredump;
 	}
@@ -1935,7 +1978,7 @@ static void aoc_watchdog(struct work_struct *work)
 	 * where AoC crashes before the userspace daemon starts running.
 	 */
 	for (i = 0; i <= sscd_retries; i++) {
-		sscd_rc = sscd_pdata.sscd_report(&sscd_dev, sscd_info.segs,
+		sscd_rc = sscd_pdata->sscd_report(sscd_dev, sscd_info.segs,
 						 sscd_info.seg_count,
 						 SSCD_FLAGS_ELFARM64HDR,
 						 crash_info);
@@ -1959,6 +2002,7 @@ err_vmap:
 		vfree(dram_pages);
 err_vmalloc:
 err_coredump:
+	mutex_unlock(&sscd_lock);
 	/* make sure there is no AoC startup work active */
 	cancel_work_sync(&prvdata->online_work);
 
@@ -2153,7 +2197,7 @@ static const struct file_operations aoc_fops = {
 	.owner = THIS_MODULE,
 };
 
-static char *aoc_devnode(struct device *dev, umode_t *mode)
+static char *aoc_devnode(const struct device *dev, umode_t *mode)
 {
 	if (!mode || !dev)
 		return NULL;
@@ -2184,7 +2228,7 @@ static int init_chardev(struct aoc_prvdata *prvdata)
 
 	aoc_major = MAJOR(prvdata->aoc_devt);
 
-	prvdata->_class = class_create(THIS_MODULE, AOC_CHARDEV_NAME);
+	prvdata->_class = class_create(AOC_CHARDEV_NAME);
 	if (!prvdata->_class) {
 		pr_err("failed to create aoc_class\n");
 		rc = -ENXIO;
@@ -2791,7 +2835,7 @@ err_platform_not_null:
 	return rc;
 }
 
-static int aoc_platform_remove(struct platform_device *pdev)
+static void aoc_platform_remove(struct platform_device *pdev)
 {
 	struct aoc_prvdata *prvdata;
 	int i;
@@ -2812,11 +2856,6 @@ static int aoc_platform_remove(struct platform_device *pdev)
 	platform_set_drvdata(pdev, NULL);
 	aoc_platform_device = NULL;
 
-	return 0;
-}
-
-static void sscd_release(struct device *dev)
-{
 }
 
 static void aoc_platform_shutdown(struct platform_device *pdev)
@@ -2842,7 +2881,7 @@ static int __init aoc_init(void)
 		goto err_aoc_driver;
 	}
 
-	if (platform_device_register(&sscd_dev) != 0) {
+	if (aoc_sscd_register() != 0) {
 		pr_err("failed to register AoC coredump device\n");
 		goto err_aoc_coredump;
 	}
@@ -2864,10 +2903,12 @@ static void __exit aoc_exit(void)
 	platform_driver_unregister(&aoc_driver);
 
 	bus_unregister(&aoc_bus_type);
+	aoc_sscd_unregister();
 }
 
 module_init(aoc_init);
 module_exit(aoc_exit);
 
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
+MODULE_IMPORT_NS("DMA_BUF_HEAP");
