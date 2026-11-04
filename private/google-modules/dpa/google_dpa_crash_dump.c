@@ -163,8 +163,9 @@ static struct platform_device *make_sscd_pdev(struct google_dpa *dpa)
 		return ERR_PTR(-ENOMEM);
 
 	/* Set the driver_override to get matched with the SSCD driver probe. */
-	driver_set_override(&sscd_pdev->dev, &sscd_pdev->driver_override, SSCD_NAME,
-			    strlen(SSCD_NAME));
+	ret = device_set_driver_override(&sscd_pdev->dev, SSCD_NAME);
+	if (ret)
+		goto sscd_put;
 	ret = platform_device_add_data(sscd_pdev, &sscd_pdata, sizeof(sscd_pdata));
 	if (ret)
 		goto sscd_put;
