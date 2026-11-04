@@ -21,6 +21,7 @@
 #include "pcie_trace.h"
 
 #define DEFAULT_PERST_DELAY_US		20000
+#define GOOGLE_LINK_WAIT_MAX_RETRIES	10
 #define LINK_UP_MAX_RETRIES		4800
 #define LINK_UP_WAIT_TIME_US		10
 #define MAX_L2_COUNT			2000
@@ -691,14 +692,14 @@ static const struct dw_pcie_host_ops google_pcie_host_ops = {
 	.msi_init = goog_pcie_msi_host_init,
 };
 
-static int google_pcie_link_up(struct dw_pcie *pci)
+static bool google_pcie_link_up(struct dw_pcie *pci)
 {
 	struct google_pcie *gpcie = dev_get_drvdata(pci->dev);
 	u32 ctl_status;
 
 	scoped_guard(spinlock_irqsave, &gpcie->power_on_lock) {
 		if (!gpcie->powered_on)
-			return 0;
+			return false;
 
 		ctl_status = readl(gpcie->sii_base + PE_LINK_DBG_2);
 	}
@@ -984,7 +985,7 @@ static int __google_pcie_rc_poweron(struct google_pcie *gpcie)
 {
 	struct dw_pcie *pci = gpcie->pci;
 	int ret;
-	int retry = LINK_WAIT_MAX_RETRIES;
+	int retry = GOOGLE_LINK_WAIT_MAX_RETRIES;
 	unsigned long flags;
 	bool link_up = false;
 	u32 reg;
@@ -2738,11 +2739,6 @@ static void google_pcie_choose_state(void *data, struct pci_dev *pci_dev,
 	*state = PCI_D3cold;
 }
 
-static void google_pcie_pm_verify_state(void *data, int *state_ret, pci_power_t *state)
-{
-	if (state_ret && state)
-		*state_ret = (*state == PCI_D3cold);
-}
 
 static int __init google_pcie_init(void)
 {
@@ -2764,10 +2760,6 @@ static int __init google_pcie_init(void)
 			google_pcie_choose_state, NULL);
 	if (ret)
 		return ret;
-	ret = register_trace_android_vh_pci_pm_verify_state(
-			google_pcie_pm_verify_state, NULL);
-	if (ret)
-		return ret;
 
 	return platform_driver_register(&google_pcie_driver);
 }
@@ -2776,8 +2768,6 @@ static void __exit google_pcie_exit(void)
 {
 	platform_driver_unregister(&google_pcie_driver);
 
-	unregister_trace_android_vh_pci_pm_verify_state(
-			google_pcie_pm_verify_state, NULL);
 	unregister_trace_android_vh_platform_pci_choose_state(
 			google_pcie_choose_state, NULL);
 	unregister_trace_android_vh_platform_pci_get_power_state(
