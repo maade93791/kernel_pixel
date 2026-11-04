@@ -5,7 +5,6 @@
  * Copyright 2025 Google LLC.
  */
 
-#include <linux/version.h>
 #include <drm/drm_atomic.h>
 #include "gim_drm.h"
 
@@ -98,7 +97,8 @@ static int connector_notifier_call(struct notifier_block *nb, unsigned long id, 
 	return 0;
 }
 
-static int panel_bridge_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
+static int panel_bridge_attach(struct drm_bridge *bridge, struct drm_encoder *encoder,
+			       enum drm_bridge_attach_flags flags)
 {
 	struct goog_display_core *display_core = bridge->driver_private;
 
@@ -157,7 +157,7 @@ static void panel_bridge_atomic_enable_internal(struct drm_bridge *bridge)
 }
 
 static void panel_bridge_atomic_disable(struct drm_bridge *bridge,
-					__always_unused struct drm_bridge_state *old_state)
+					struct drm_atomic_state *state)
 {
 	struct goog_display_core *display_core = bridge->driver_private;
 
@@ -248,7 +248,7 @@ static void panel_bridge_mode_set(struct drm_bridge *bridge, const struct drm_di
 }
 
 static void panel_bridge_atomic_enable(struct drm_bridge *bridge,
-				       __always_unused struct drm_bridge_state *old_state)
+				       struct drm_atomic_state *state)
 {
 	struct goog_display_core *display_core = bridge->driver_private;
 	struct drm_connector *connector;
@@ -341,16 +341,13 @@ void gim_register_panel_bridge(struct goog_interface_manager *gim)
 			continue;
 		}
 		dn = gim->interfaces[i].vendor_dev_node;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0) //refer to pa/3446481
 		bridge = __devm_drm_bridge_alloc(gim->dev, sizeof(struct drm_bridge), 0,
 						 &panel_bridge_funcs);
-#else
-		bridge = devm_kzalloc(gim->dev, sizeof(struct drm_bridge), GFP_KERNEL);
-		if (bridge)
-			bridge->funcs = &panel_bridge_funcs;
-#endif
-		if (!bridge)
+		if (IS_ERR(bridge)) {
+			dev_err(gim->dev, "Failed to allocate touch panel bridge: %ld\n",
+				PTR_ERR(bridge));
 			continue;
+		}
 		bridge->driver_private = &display_cores[i];
 #ifdef CONFIG_OF
 		bridge->of_node = dn;
@@ -369,29 +366,35 @@ void gim_unregister_panel_bridge(struct goog_interface_manager *gim)
 	u8 i;
 	struct drm_bridge *bridge;
 	struct drm_bridge *node;
+	struct drm_device *drm;
 
 	for (i = 0; i < ARRAY_SIZE(display_cores); i++) {
-		if (!display_cores[i].bridge || !display_cores[i].interface)
-			continue;
-
 		bridge = display_cores[i].bridge;
+		if (!bridge)
+			goto clear_core;
 		drm_bridge_remove(bridge);
 		pr_info("%s for %s", __func__, display_cores[i].interface->name);
-		if (!bridge->dev) /* not attached */
-			continue;
+		drm = bridge->dev;
+		if (!drm)
+			goto clear_core;
 
-		drm_modeset_lock(&bridge->dev->mode_config.connection_mutex, NULL);
+		drm_modeset_lock(&drm->mode_config.connection_mutex, NULL);
 		list_for_each_entry(node, &bridge->encoder->bridge_chain, chain_node) {
 			if (node == bridge) {
 				drm_atomic_private_obj_fini(&bridge->base);
 				if (bridge->funcs->detach)
 					bridge->funcs->detach(bridge);
 				list_del(&bridge->chain_node);
+				bridge->dev = NULL;
+				drm_bridge_put(bridge);
 				break;
 			}
 		}
-		drm_modeset_unlock(&bridge->dev->mode_config.connection_mutex);
-		bridge->dev = NULL;
+		drm_modeset_unlock(&drm->mode_config.connection_mutex);
+clear_core:
+		display_cores[i].bridge = NULL;
+		display_cores[i].connector = NULL;
+		display_cores[i].interface = NULL;
 	}
 }
 EXPORT_SYMBOL_GPL(gim_unregister_panel_bridge);
