@@ -245,8 +245,7 @@ static int t900_gps_dump_probe(struct platform_device *pdev)
 	priv->sscd_dev->dev.parent = &pdev->dev;
 	ret = platform_device_add_data(priv->sscd_dev, &pdata, sizeof(pdata));
 	if (!ret)
-		ret = driver_set_override(&priv->sscd_dev->dev, &priv->sscd_dev->driver_override,
-					  SSCD_NAME, strlen(SSCD_NAME));
+		ret = device_set_driver_override(&priv->sscd_dev->dev, SSCD_NAME);
 	if (!ret)
 		ret = platform_device_add(priv->sscd_dev);
 	if (ret) {
