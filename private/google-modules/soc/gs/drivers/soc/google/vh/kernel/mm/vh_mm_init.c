@@ -382,8 +382,8 @@ static ssize_t fail_of_gup_longterm_locked_store(struct kobject *kobj,
 VENDOR_MM_RW(fail_of_gup_longterm_locked);
 
 static ssize_t deferred_free_thread_nice_show(struct kobject *kobj,
-						struct kobj_attribute *attr,
-						char *buf)
+					      struct kobj_attribute *attr,
+					      char *buf)
 {
 	if (freelist_task)
 		return sysfs_emit(buf, "%d\n", task_nice(freelist_task));
@@ -392,26 +392,19 @@ static ssize_t deferred_free_thread_nice_show(struct kobject *kobj,
 }
 
 static ssize_t deferred_free_thread_nice_store(struct kobject *kobj,
-						struct kobj_attribute *attr,
-						const char *buf,
-						size_t len)
+					       struct kobj_attribute *attr,
+					       const char *buf, size_t len)
 {
 	int nice;
 
 	if (kstrtoint(buf, 10, &nice))
 		return -EINVAL;
 
-	if (nice < MIN_NICE)
-		nice = MIN_NICE;
-	if (nice > MAX_NICE)
-		nice = MAX_NICE;
-
-	if (freelist_task) {
-		sched_set_normal(freelist_task, nice);
-	} else {
-		WARN_ON_ONCE(1);
+	if (!freelist_task)
 		return -ESRCH;
-	}
+
+	nice = clamp(nice, MIN_NICE, MAX_NICE);
+	sched_set_normal(freelist_task, nice);
 
 	return len;
 }
