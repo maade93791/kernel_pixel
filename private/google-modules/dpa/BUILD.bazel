@@ -99,17 +99,24 @@ copy_files(
 copy_files(
     name = "nanopb_sources",
     srcs = [
-        "@nanopb-c//:sources",
+        "nanopb/runtime/pb_common.c",
+        "nanopb/runtime/pb_decode.c",
+        "nanopb/runtime/pb_encode.c",
     ],
     prefix = "nanopb",
+    strip_prefix = "nanopb/runtime",
 )
 
 copy_files(
     name = "nanopb_headers",
     srcs = [
-        "@nanopb-c//:headers",
+        "nanopb/runtime/pb.h",
+        "nanopb/runtime/pb_common.h",
+        "nanopb/runtime/pb_decode.h",
+        "nanopb/runtime/pb_encode.h",
     ],
     prefix = "nanopb",
+    strip_prefix = "nanopb/runtime",
 )
 
 genrule(

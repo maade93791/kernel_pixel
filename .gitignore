@@ -2,3 +2,10 @@
 out/
 
 device.bazelrc
+
+/.repo/
+/build/
+/common/
+/external/
+/prebuilts/
+/private/google-modules/dpa/nanopb/runtime/

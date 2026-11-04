@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 build:malibu_base --//private/devices/google/common:soc=malibu
+build:malibu_base --defconfig_fragment=//private/devices/google/lga:disable_slab_canary_defconfig
 build:malibu_base --//private/google-modules/perf/core/gs_perf_domain:enable_perf_domain=True
 build:malibu_base --//private/google-modules/perf/core/gs_perf_mon:enable_gs_perf_mon=True
 build:malibu_base --//private/google-modules/perf/core/lat_govs:enable_lat_govs=True
