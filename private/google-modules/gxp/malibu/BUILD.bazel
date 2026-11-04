@@ -53,6 +53,8 @@ ddk_module(
     ],
     deps = [
         "//common:all_headers_aarch64",
+        "//private/google-modules/iommu/arm-smmu-v3:headers",
+        "//private/google-modules/iommu/arm-smmu-v3/drivers/iommu:io-pgtable-pixel",
         "//private/google-modules/edgetpu/santafe/drivers/edgetpu:edgetpu.santafe",
         "//private/google-modules/edgetpu/santafe/drivers/edgetpu:headers",
         "//private/google-modules/iif",
