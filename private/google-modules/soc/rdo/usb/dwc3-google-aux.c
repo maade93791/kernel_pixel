@@ -16,8 +16,8 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 
-#include "gadget.h"
-#include "core.h"
+#include "drivers/usb/dwc3/core.h"
+#include "drivers/usb/dwc3/gadget.h"
 
 #define CREATE_TRACE_POINTS
 #include "usb_trace.h"
