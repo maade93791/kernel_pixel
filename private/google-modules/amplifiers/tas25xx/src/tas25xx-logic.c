@@ -170,8 +170,8 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 		(struct linux_platform *) p_tas25xx->platform_data;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
-		dev_info(plat_data->dev, "SND_SOC_DAIFMT_CBS_CFS\n");
+	case SND_SOC_DAIFMT_CBC_CFC:
+		dev_info(plat_data->dev, "SND_SOC_DAIFMT_CBC_CFC\n");
 		break;
 	default:
 		dev_err(plat_data->dev, "ASI format mask is not found\n");

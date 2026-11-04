@@ -63,11 +63,16 @@ static const char *const aw882xx_spin[] = {"spin_0", "spin_90",
  *
  ******************************************************/
 #ifdef AW_KERNEL_VER_OVER_4_19_1
+static void aw882xx_unregister_component(struct device *dev)
+{
+	snd_soc_unregister_component(dev);
+}
+
 static struct aw_component_codec_ops aw_component_codec_ops = {
 	.kcontrol_codec = snd_soc_kcontrol_component,
 	.codec_get_drvdata = snd_soc_component_get_drvdata,
 	.add_codec_controls = snd_soc_add_component_controls,
-	.unregister_codec = snd_soc_unregister_component,
+	.unregister_codec = aw882xx_unregister_component,
 	.register_codec = snd_soc_register_component,
 };
 #else
