@@ -282,14 +282,12 @@ static void t900_gps_dump_remove(struct platform_device *pdev)
 	if (!priv)
 		return;
 
-	mutex_destroy(&priv->lock);
-
-	platform_device_unregister(&priv->sscd_dev);
-
 	if (priv->dev)
 		device_destroy(gpsdump_class, dev_num);
 
 	cdev_del(&priv->cdev);
+	platform_device_unregister(&priv->sscd_dev);
+	mutex_destroy(&priv->lock);
 }
 
 static struct platform_driver t900_gps_dump_driver = {
