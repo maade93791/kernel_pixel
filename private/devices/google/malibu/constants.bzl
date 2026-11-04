@@ -27,7 +27,6 @@ MALIBU_MODULE_OUTS = [
     "drivers/i2c/i2c-dev.ko",
     "drivers/misc/eeprom/at24.ko",
     "drivers/nvmem/nvmem-rmem.ko",
-    "drivers/pci/pwrctrl/pci-pwrctrl-core.ko",
     "drivers/perf/arm-ni.ko",
     "drivers/perf/arm_dsu_pmu.ko",
     "drivers/perf/arm_spe_pmu.ko",
