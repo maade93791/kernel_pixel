@@ -276,22 +276,22 @@ ssize_t sub_pwrwarn_threshold_store(struct device *dev,
 ssize_t odpm_irq_stat(struct device *dev, struct device_attribute *attr,
 		      char *buf, int pmic, int channel);
 ssize_t sys_evt_main_read(struct file *filp, struct kobject *kobj,
-			  struct bin_attribute *attr, char *buf, loff_t off,
+			  const struct bin_attribute *attr, char *buf, loff_t off,
 			  size_t count);
 ssize_t sys_evt_sub_read(struct file *filp, struct kobject *kobj,
-			 struct bin_attribute *attr, char *buf, loff_t off,
+			 const struct bin_attribute *attr, char *buf, loff_t off,
 			 size_t count);
 ssize_t cpm_cached_sys_evt_main_read(struct file *filp, struct kobject *kobj,
-				     struct bin_attribute *attr, char *buf,
+				     const struct bin_attribute *attr, char *buf,
 				     loff_t off, size_t count);
 ssize_t cpm_cached_sys_evt_sub_read(struct file *filp, struct kobject *kobj,
-				    struct bin_attribute *attr, char *buf,
+				    const struct bin_attribute *attr, char *buf,
 				    loff_t off, size_t count);
 ssize_t br_stats_dump_read(struct file *filp, struct kobject *kobj,
-			   struct bin_attribute *attr, char *buf, loff_t off,
+			   const struct bin_attribute *attr, char *buf, loff_t off,
 			   size_t count);
 ssize_t max_odpm_stats_dump_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count);
 
 #endif /* __BCL_SYSFS_COMMON_H */

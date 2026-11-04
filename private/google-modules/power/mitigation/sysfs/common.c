@@ -2699,7 +2699,7 @@ static ssize_t meter_channels_show(struct device *dev, struct device_attribute *
 DEVICE_ATTR_RO(meter_channels);
 
 ssize_t br_stats_dump_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
@@ -2922,7 +2922,7 @@ static ssize_t sys_evt_data_show(struct device *dev, struct device_attribute *at
 DEVICE_ATTR_RO(sys_evt_data);
 
 ssize_t sys_evt_main_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
@@ -2940,7 +2940,7 @@ ssize_t sys_evt_main_read(struct file *filp,
 }
 
 ssize_t sys_evt_sub_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
@@ -2958,7 +2958,7 @@ ssize_t sys_evt_sub_read(struct file *filp,
 }
 
 ssize_t cpm_cached_sys_evt_main_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
@@ -2976,7 +2976,7 @@ ssize_t cpm_cached_sys_evt_main_read(struct file *filp,
 }
 
 ssize_t cpm_cached_sys_evt_sub_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
@@ -3038,7 +3038,7 @@ static ssize_t odpm_irq_stat_tpu_bckup_show(struct device *dev, struct device_at
 DEVICE_ATTR_RO(odpm_irq_stat_tpu_bckup);
 
 ssize_t max_odpm_stats_dump_read(struct file *filp,
-				  struct kobject *kobj, struct bin_attribute *attr,
+				  struct kobject *kobj, const struct bin_attribute *attr,
 				  char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);

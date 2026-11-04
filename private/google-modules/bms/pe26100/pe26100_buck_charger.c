@@ -1043,7 +1043,7 @@ static int pe26100_buck_init_wcin_psy(struct pe26100_buck_charger *data)
 
 	if (!data->wcin_psy) {
 		chgr_psy_cfg.drv_data = data;
-		chgr_psy_cfg.of_node = dev->of_node;
+		chgr_psy_cfg.fwnode = dev_fwnode(dev);
 		chgr_psy_cfg.supplied_to = wlcin_mains_name;
 		chgr_psy_cfg.num_supplicants = ARRAY_SIZE(wlcin_mains_name);
 

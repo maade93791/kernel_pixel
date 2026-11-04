@@ -5049,7 +5049,7 @@ static int pe26100_cp_probe(struct platform_device *pdev)
 	}
 
 	wcin_psy_cfg.drv_data = pe26100_cp;
-	wcin_psy_cfg.of_node = dev->of_node;
+	wcin_psy_cfg.fwnode = dev_fwnode(dev);
 	wcin_psy_cfg.supplied_to = wlcin_mains_name;
 	wcin_psy_cfg.num_supplicants = ARRAY_SIZE(wlcin_mains_name);
 	pe26100_cp->wcin_psy = devm_power_supply_register(dev,

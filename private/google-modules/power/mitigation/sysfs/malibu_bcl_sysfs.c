@@ -510,13 +510,13 @@ static struct attribute *triggered_state_mw_attrs[] = {
 	NULL,
 };
 
-static struct bin_attribute sys_evt_main_attr = {
+static const struct bin_attribute sys_evt_main_attr = {
 	.attr = { .name = "sys_evt_main", .mode = 0444 },
 	.read = sys_evt_main_read,
 	.size = SYS_EVT_MAX_MAIN,
 };
 
-static struct bin_attribute sys_evt_sub_attr = {
+static const struct bin_attribute sys_evt_sub_attr = {
 	.attr = { .name = "sys_evt_sub", .mode = 0444 },
 	.read = sys_evt_sub_read,
 	.size = SYS_EVT_MAX_SUB,
@@ -556,19 +556,19 @@ GEN_ODPM_STAT_EXT(SYS_EVT_SUB, 1);
 GEN_ODPM_STAT_EXT(SYS_EVT_SUB, 2);
 GEN_ODPM_STAT_EXT(SYS_EVT_SUB, 3);
 
-static struct bin_attribute cpm_cached_sys_evt_main_attr = {
+static const struct bin_attribute cpm_cached_sys_evt_main_attr = {
 	.attr = { .name = "cpm_cached_sys_evt_main", .mode = 0444 },
 	.read = cpm_cached_sys_evt_main_read,
 	.size = SYS_EVT_MAX_MAIN,
 };
 
-static struct bin_attribute cpm_cached_sys_evt_sub_attr = {
+static const struct bin_attribute cpm_cached_sys_evt_sub_attr = {
 	.attr = { .name = "cpm_cached_sys_evt_sub", .mode = 0444 },
 	.read = cpm_cached_sys_evt_sub_read,
 	.size = SYS_EVT_MAX_SUB,
 };
 
-static struct bin_attribute *sys_evt_bin_attrs[] = {
+static const struct bin_attribute *const sys_evt_bin_attrs[] = {
 	&sys_evt_main_attr,
 	&sys_evt_sub_attr,
 	&cpm_cached_sys_evt_main_attr,
@@ -576,19 +576,19 @@ static struct bin_attribute *sys_evt_bin_attrs[] = {
 	NULL,
 };
 
-static struct bin_attribute br_stats_dump_attr = {
+static const struct bin_attribute br_stats_dump_attr = {
 	.attr = { .name = "stats", .mode = 0444 },
 	.read = br_stats_dump_read,
 	.size = sizeof(struct brownout_stats),
 };
 
-static struct bin_attribute max_odpm_stats_dump_attr = {
+static const struct bin_attribute max_odpm_stats_dump_attr = {
 	.attr = { .name = "max_odpm_stats", .mode = 0444 },
 	.read = max_odpm_stats_dump_read,
 	.size = sizeof(struct max_odpm_stats),
 };
 
-static struct bin_attribute *br_stats_bin_attrs[] = {
+static const struct bin_attribute *const br_stats_bin_attrs[] = {
 	&br_stats_dump_attr,
 	&max_odpm_stats_dump_attr,
 	NULL,
