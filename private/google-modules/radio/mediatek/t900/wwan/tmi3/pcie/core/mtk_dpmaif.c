@@ -20,6 +20,7 @@
 #include <linux/tcp.h>
 #include <linux/timer.h>
 #include <linux/version.h>
+#include <net/gro.h>
 #include <net/ip6_checksum.h>
 #include <net/ipv6.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
@@ -3957,8 +3958,8 @@ static int mtk_dpmaif_doorbell_task_init(struct mtk_dpmaif_ctlb *dcb)
 	init_waitqueue_head(&db_ctlb->task_ctlb.wait);
 	init_completion(&db_ctlb->task_ctlb.paused_comp);
 
-	hrtimer_init(&db_ctlb->db_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	db_ctlb->db_timer.function = mtk_dpmaif_doorbell_timer_func;
+	hrtimer_setup(&db_ctlb->db_timer, mtk_dpmaif_doorbell_timer_func,
+		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 	spin_lock_init(&db_ctlb->db_timer_lock);
 

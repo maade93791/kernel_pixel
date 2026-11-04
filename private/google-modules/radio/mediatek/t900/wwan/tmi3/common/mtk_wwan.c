@@ -21,6 +21,7 @@
 #include <linux/types.h>
 #include <linux/version.h>
 #include <linux/wwan.h>
+#include <net/gro.h>
 #include <net/pkt_sched.h>
 #include <net/sch_generic.h>
 
@@ -87,7 +88,7 @@ struct mtk_wwan_ctlb {
 	struct mtk_data_blk *data_blk;
 	struct mtk_md_dev *mdev;
 	struct mtk_wwan_instance __rcu *wwan_inst[MTK_NETDEV_MAX];
-	struct net_device dummy_dev;
+	struct net_device *dummy_dev;
 	struct napi_struct *gro_napis[MTK_DATA_NAPI_NR_MAX];
 	atomic_t napi_enabled;
 	unsigned int active_cnt;
@@ -209,7 +210,7 @@ static void mtk_wwan_trans_napi_enable(struct mtk_wwan_ctlb *wcb)
 	if (atomic_cmpxchg(&wcb->napi_enabled, 0, 1) == 0) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
 #ifdef CONFIG_DATA_CPU_LOADING_OPTIMIZE
-		ret = dev_set_threaded(&wcb->dummy_dev, true);
+		ret = dev_set_threaded(wcb->dummy_dev, NETDEV_NAPI_THREADED_ENABLED);
 		MTK_INFO(wcb->mdev, "dev_set_threaded return = %d\n", ret);
 #endif
 #endif
@@ -919,12 +920,14 @@ static int mtk_wwan_stop_txq(struct mtk_wwan_ctlb *wcb, u32 qmask)
 #if defined(CONFIG_DATA_CPU_LOADING_OPTIMIZE) || defined(CONFIG_DATA_GRO_WITHOUT_NAPI_POLL)
 static void mtk_wwan_gro_normal_list(struct napi_struct *napi)
 {
+	struct gro_node *gro = &napi->gro;
+
 	local_bh_disable();
-	napi_gro_flush(napi, false);
-	if (napi->rx_count) {
-		netif_receive_skb_list(&napi->rx_list);
-		INIT_LIST_HEAD(&napi->rx_list);
-		napi->rx_count = 0;
+	gro_flush(gro, false);
+	if (gro->rx_count) {
+		netif_receive_skb_list(&gro->rx_list);
+		INIT_LIST_HEAD(&gro->rx_list);
+		gro->rx_count = 0;
 	}
 	local_bh_enable();
 }
@@ -1237,14 +1240,18 @@ int mtk_wwan_init(struct mtk_data_blk *data_blk)
 	/* Multiple virtual network devices share one physical device,
 	 * so we use dummy device to enable NAPI for multiple virtual network devices.
 	 */
-	init_dummy_netdev(&wcb->dummy_dev);
+	wcb->dummy_dev = alloc_netdev_dummy(0);
+	if (!wcb->dummy_dev) {
+		ret = -ENOMEM;
+		goto wcb_free;
+	}
 
 	data_blk->wcb = wcb;
-	ret = mtk_wwan_gro_napi_init(wcb, &wcb->dummy_dev);
+	ret = mtk_wwan_gro_napi_init(wcb, wcb->dummy_dev);
 	if (ret < 0)
-		goto wcb_free;
+		goto free_net;
 #ifndef CONFIG_DATA_GRO_WITHOUT_NAPI_POLL
-	ret = mtk_wwan_trans_napi_init(wcb, &wcb->dummy_dev);
+	ret = mtk_wwan_trans_napi_init(wcb, wcb->dummy_dev);
 	if (ret < 0)
 		goto gro_napi_exit;
 #endif
@@ -1257,6 +1264,8 @@ gro_napi_exit:
 	mtk_wwan_gro_napi_exit(wcb);
 #endif
 
+free_net:
+	free_netdev(wcb->dummy_dev);
 wcb_free:
 	data_blk->wcb = NULL;
 	devm_kfree(data_blk->mdev->dev, wcb);
@@ -1276,6 +1285,7 @@ void mtk_wwan_exit(struct mtk_data_blk *data_blk)
 	mtk_wwan_trans_napi_exit(wcb);
 #endif
 	mtk_wwan_gro_napi_exit(wcb);
+	free_netdev(wcb->dummy_dev);
 	devm_kfree(data_blk->mdev->dev, wcb);
 	data_blk->wcb = NULL;
 
