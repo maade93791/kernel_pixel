@@ -9,8 +9,8 @@
     <linkfile dest="MODULE.bazel" src="kleaf/bzlmod/bazel.MODULE.bazel" />
   </project>
   <project name="kernel_common-6.18" path="common" remote="grapheneos" groups="dependencies"
-    revision="1d1990c55a55ce4375a97ab0041f6dc8e8c1e936"
-    upstream="refs/heads/17" dest-branch="refs/heads/17">
+    revision="ccd2e7642fa303c487f805f32c956f7bdad8a26f"
+    upstream="refs/heads/17-muzel" dest-branch="refs/heads/17-muzel">
     <linkfile dest=".clang-format" src=".clang-format" />
     <linkfile dest="aosp" src="." />
   </project>
