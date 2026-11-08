@@ -3,10 +3,14 @@
   <remote name="aosp" fetch="https://android.googlesource.com/" />
   <remote name="grapheneos" fetch="https://github.com/GrapheneOS/" />
   <default revision="android-gs-laguna-6.6-android17-qpr1-beta" remote="aosp" sync-c="true" sync-j="32" />
-  <project name="kernel/build" path="build/kernel" revision="38e2a76ecb0257fe1f27b0078cd9169191601ec7" upstream="main-kernel-2026" dest-branch="main-kernel-2026" groups="dependencies,ddk" remote="aosp">
+  <project name="kernel/build" path="build/kernel" remote="aosp"
+    revision="38e2a76ecb0257fe1f27b0078cd9169191601ec7"
+    upstream="main-kernel-2026" dest-branch="main-kernel-2026" groups="dependencies,ddk">
     <linkfile dest="MODULE.bazel" src="kleaf/bzlmod/bazel.MODULE.bazel" />
   </project>
-  <project name="kernel_common-6.18" path="common" remote="grapheneos" groups="dependencies" revision="e9e96ec18264398bc4e9f2a1092e7a5ade4fde94" upstream="refs/heads/gs-6.18-maintenance" dest-branch="refs/heads/gs-6.18-maintenance">
+  <project name="kernel_common-6.18" path="common" remote="grapheneos" groups="dependencies"
+    revision="ccd2e7642fa303c487f805f32c956f7bdad8a26f"
+    upstream="refs/heads/17-muzel" dest-branch="refs/heads/17-muzel">
     <linkfile dest=".clang-format" src=".clang-format" />
     <linkfile dest="aosp" src="." />
   </project>
