@@ -36,7 +36,6 @@
 #include <linux/kthread.h>
 #include <linux/random.h>
 #include <linux/irqdomain.h>
-#include <linux/irqchip/irq-msi-lib.h>
 #include <linux/pinctrl/consumer.h>
 
 #include <soc/google/exynos-pm.h>
@@ -5039,7 +5038,8 @@ static bool exynos_pcie_init_dev_msi_info(struct device *dev, struct irq_domain 
 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pci);
 
-	if (!msi_lib_init_dev_msi_info(dev, domain, real_parent, info))
+	/* Preserve DesignWare ACK and interrupt redirection setup. */
+	if (!exynos_pcie->dw_msi_parent_ops->init_dev_msi_info(dev, domain, real_parent, info))
 		return false;
 
 	info->chip->irq_set_affinity = exynos_pcie_msi_set_affinity;
@@ -5069,7 +5069,8 @@ static int exynos_pcie_rc_msi_host_init(struct dw_pcie_rp *pp)
 
 	/* This callback still uses the DesignWare controller and its cleanup. */
 	pp->has_msi_ctrl = true;
-	exynos_pcie->msi_parent_ops = *pp->irq_domain->msi_parent_ops;
+	exynos_pcie->dw_msi_parent_ops = pp->irq_domain->msi_parent_ops;
+	exynos_pcie->msi_parent_ops = *exynos_pcie->dw_msi_parent_ops;
 	exynos_pcie->msi_parent_ops.init_dev_msi_info = exynos_pcie_init_dev_msi_info;
 	pp->irq_domain->msi_parent_ops = &exynos_pcie->msi_parent_ops;
 	return 0;
