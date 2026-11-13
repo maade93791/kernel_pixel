@@ -35,8 +35,7 @@ struct t900_gps_dump_priv {
 	struct cdev cdev;
 	struct device *dev;
 	struct platform_device *pdev;
-	struct platform_device sscd_dev;
-	struct sscd_platform_data sscd_pdata;
+	struct platform_device *sscd_dev;
 	struct mutex lock;
 	enum gps_dump_state state;
 	size_t total_coredump_size;
@@ -175,17 +174,17 @@ static ssize_t t900_gps_handle_coredump_write(struct t900_gps_dump_priv *priv,
 	priv->current_coredump_pos += bytes_to_copy;
 
 	if (priv->current_coredump_pos == priv->total_coredump_size) {
+		struct sscd_platform_data *pdata = dev_get_platdata(&priv->sscd_dev->dev);
+
 		priv->state = GPS_DUMP_STATE_COMPLETE;
 
-		if (priv->sscd_pdata.sscd_report && priv->coredump_buffer) {
+		if (pdata->sscd_report && priv->coredump_buffer) {
 			struct sscd_segment seg = {
 				.addr = priv->coredump_buffer,
 				.size = priv->total_coredump_size,
 			};
 
-			priv->sscd_pdata.sscd_report(
-				&priv->sscd_dev, &seg, 1, 0,
-				priv->header_info->crashinfo);
+			pdata->sscd_report(priv->sscd_dev, &seg, 1, 0, priv->header_info->crashinfo);
 		}
 	}
 	return bytes_to_copy;
@@ -227,13 +226,9 @@ static const struct file_operations t900_gps_dump_fops = {
 	.release = t900_gps_dump_release,
 };
 
-static void sscd_release(struct device *dev)
-{
-	(void)dev;
-}
-
 static int t900_gps_dump_probe(struct platform_device *pdev)
 {
+	struct sscd_platform_data pdata = {};
 	struct t900_gps_dump_priv *priv;
 	int ret;
 
@@ -244,35 +239,42 @@ static int t900_gps_dump_probe(struct platform_device *pdev)
 	mutex_init(&priv->lock);
 	priv->pdev = pdev;
 
+	priv->sscd_dev = platform_device_alloc(SUBSYSTEM_NAME, PLATFORM_DEVID_NONE);
+	if (!priv->sscd_dev)
+		return -ENOMEM;
+	priv->sscd_dev->dev.parent = &pdev->dev;
+	ret = platform_device_add_data(priv->sscd_dev, &pdata, sizeof(pdata));
+	if (!ret)
+		ret = driver_set_override(&priv->sscd_dev->dev, &priv->sscd_dev->driver_override,
+					  SSCD_NAME, strlen(SSCD_NAME));
+	if (!ret)
+		ret = platform_device_add(priv->sscd_dev);
+	if (ret) {
+		platform_device_put(priv->sscd_dev);
+		return ret;
+	}
+
 	cdev_init(&priv->cdev, &t900_gps_dump_fops);
 	priv->cdev.owner = THIS_MODULE;
 
 	ret = cdev_add(&priv->cdev, dev_num, 1);
 	if (ret < 0)
-		return ret;
+		goto unregister_sscd;
 
 	priv->dev = device_create(gpsdump_class, &pdev->dev, dev_num, NULL, DRIVER_NAME);
 	if (IS_ERR(priv->dev)) {
 		ret = PTR_ERR(priv->dev);
 		cdev_del(&priv->cdev);
-		return ret;
+		goto unregister_sscd;
 	}
 
 	platform_set_drvdata(pdev, priv);
 
-	priv->sscd_dev = (struct platform_device){
-		.name            = SUBSYSTEM_NAME,
-		.driver_override = SSCD_NAME,
-		.id              = -1,
-		.dev             = {
-			.platform_data = &priv->sscd_pdata,
-			.release       = sscd_release,
-			},
-	};
-
-	platform_device_register(&priv->sscd_dev);
-
 	return 0;
+
+unregister_sscd:
+	platform_device_unregister(priv->sscd_dev);
+	return ret;
 }
 
 static void t900_gps_dump_remove(struct platform_device *pdev)
@@ -286,7 +288,7 @@ static void t900_gps_dump_remove(struct platform_device *pdev)
 		device_destroy(gpsdump_class, dev_num);
 
 	cdev_del(&priv->cdev);
-	platform_device_unregister(&priv->sscd_dev);
+	platform_device_unregister(priv->sscd_dev);
 	mutex_destroy(&priv->lock);
 }
 
