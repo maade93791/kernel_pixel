@@ -48,5 +48,5 @@
   <project name="platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8" path="prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8" revision="b1d5a0acb5df6aed7db41faedd5ff06496df6141" upstream="main-kernel-2026" dest-branch="main-kernel-2026" clone-depth="1" groups="dependencies,ddk"/>
   <project name="kernel/prebuilts/build-tools" path="prebuilts/kernel-build-tools" revision="484fbc79adb06e140839221736e08bd5939db17e" upstream="main-kernel-2026" dest-branch="main-kernel-2026" clone-depth="1" groups="dependencies,ddk"/>
   <project name="toolchain/prebuilts/ndk/r27" path="prebuilts/ndk-r27" revision="86613fbdf16e5d1528ea2015d8ee00c29cc747ae" upstream="main-kernel-2026" dest-branch="main-kernel-2026" clone-depth="1" groups="dependencies,ddk"/>
-  <project name="platform/prebuilts/rust-toolchain/linux-x86" path="prebuilts/rust-toolchain/linux-x86" revision="a04f70c5179f23eff11c58cb480acee4afb1334b" upstream="main-kernel-2026" dest-branch="main-kernel-2026" clone-depth="1" groups="dependencies,ddk"/>
+  <project name="platform/prebuilts/rust-toolchain/linux-x86" path="prebuilts/rust-toolchain/linux-x86" revision="844e1621bcf67c25ceae15bdd3ddd698cbe8df7c" upstream="main-kernel-2026" dest-branch="main-kernel-2026" clone-depth="1" groups="dependencies,ddk"/>
 </manifest>
