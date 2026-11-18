@@ -8819,6 +8819,7 @@ _dhd_remove_if(dhd_pub_t *dhdpub, dhd_if_t *ifp, bool need_rtnl_lock)
 	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
 	unsigned long flags;
 	long timeout;
+	bool free_net;
 
 #if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 	if (ifp->net)
@@ -8860,10 +8861,13 @@ _dhd_remove_if(dhd_pub_t *dhdpub, dhd_if_t *ifp, bool need_rtnl_lock)
 			dhdinfo->iflist[ifp->idx] = NULL;
 		}
 
-		/* in unregister_netdev case, the interface gets freed by net->destructor
-		 * (which is set to free_netdev)
-		 */
-		if (ifp->net->reg_state == NETREG_UNINITIALIZED) {
+		/* Failed registration leaves the netdev for the caller to free. */
+		free_net = ifp->net->reg_state == NETREG_UNINITIALIZED;
+#if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
+		if (wl_cfg80211_cleanup_failed_vif(ifp->net))
+			free_net = true;
+#endif
+		if (free_net) {
 			free_netdev(ifp->net);
 		} else {
 			netif_tx_disable(ifp->net);
@@ -15790,7 +15794,8 @@ _dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock, dhd_if_t *ifp)
 	return 0;
 
 fail:
-	net->netdev_ops = NULL;
+	if (net->reg_state == NETREG_UNINITIALIZED)
+		net->netdev_ops = NULL;
 	return err;
 }
 

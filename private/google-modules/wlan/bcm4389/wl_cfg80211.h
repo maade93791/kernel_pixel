@@ -2306,6 +2306,7 @@ struct bcm_cfg80211 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0))
 /* May sleep; no RTNL/wiphy acquisition occurs while holding event_sync. */
 void wl_cfg80211_quiesce_wiphy_events(struct wireless_dev *wdev);
+bool wl_cfg80211_cleanup_failed_vif(struct net_device *ndev);
 void wl_cfg80211_resume_wiphy_events(struct wireless_dev *wdev);
 int wl_cfg80211_queue_ch_switch_event(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev,
 	const struct cfg80211_chan_def *chandef, unsigned int link_id);
