@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/cpufreq.h>
 #include <linux/sched/clock.h>
+#include <trace/events/pixel_clock.h>
 #include "sched.h"
 #include "sched_events.h"
 #include "drivers/android/binder_internal.h"
