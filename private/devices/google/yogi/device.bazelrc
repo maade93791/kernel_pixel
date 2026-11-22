@@ -3,6 +3,7 @@
 # Copyright (C) 2024 Google LLC
 
 build:yogi --config=malibu_base
+build:yogi --localversion_suffix=-yogi
 build:yogi --//private/devices/google/common:kernel=//private/devices/google/yogi:yogi/kernel
 build:yogi --//private/google-modules/amplifiers/cs40l26:version=v16.4.0+v5.1.0
 build:yogi --//private/google-modules/touch/common:api_version=2
