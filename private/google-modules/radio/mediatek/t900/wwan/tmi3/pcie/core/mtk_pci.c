@@ -1803,19 +1803,18 @@ static int mtk_pci_bar_init(struct mtk_md_dev *mdev)
 		pci_read_config_dword(to_pci_dev(mdev->dev),
 				      PCI_BASE_ADDRESS_0 + (i << 2), bar + i);
 
-	ret = pcim_iomap_regions(pdev, MTK_REQUESTED_BARS, mdev->dev_str);
-	if (ret) {
-		MTK_ERR(mdev, "Failed to init MMIO. ret=%d\n", ret);
-		return ret;
+	priv->mac_reg_base = pcim_iomap_region(pdev, MTK_BAR_0_1_IDX, mdev->dev_str);
+	if (IS_ERR(priv->mac_reg_base))
+		return PTR_ERR(priv->mac_reg_base);
+	priv->bar23_addr = pcim_iomap_region(pdev, MTK_BAR_2_3_IDX, mdev->dev_str);
+	if (IS_ERR(priv->bar23_addr)) {
+		ret = PTR_ERR(priv->bar23_addr);
+		goto unmap_bar0;
 	}
-
-	/* get ioremapped memory */
-	priv->mac_reg_base = pcim_iomap_table(pdev)[MTK_BAR_0_1_IDX];
-	priv->bar23_addr = pcim_iomap_table(pdev)[MTK_BAR_2_3_IDX];
-	priv->bar45_addr = pcim_iomap_table(pdev)[MTK_BAR_4_5_IDX];
-	if (!priv->mac_reg_base || !priv->bar23_addr || !priv->bar45_addr) {
-		MTK_ERR(mdev, "Failed to init BAR.\n");
-		return -EINVAL;
+	priv->bar45_addr = pcim_iomap_region(pdev, MTK_BAR_4_5_IDX, mdev->dev_str);
+	if (IS_ERR(priv->bar45_addr)) {
+		ret = PTR_ERR(priv->bar45_addr);
+		goto unmap_bar2;
 	}
 	MTK_INFO(mdev, "BAR Addr 0/1:0x%llx, BAR2/3 Addr=0x%llx, BAR4/5 Addr=0x%llx\n",
 		 priv->mac_reg_base, priv->bar23_addr, priv->bar45_addr);
@@ -1826,11 +1825,21 @@ static int mtk_pci_bar_init(struct mtk_md_dev *mdev)
 	priv->ext_reg_base = priv->bar23_addr - ATR_PCIE_REG_TRSL_ADDR;
 
 	return 0;
+
+unmap_bar2:
+	pcim_iounmap_region(pdev, MTK_BAR_2_3_IDX);
+unmap_bar0:
+	pcim_iounmap_region(pdev, MTK_BAR_0_1_IDX);
+	return ret;
 }
 
 static void mtk_pci_bar_exit(struct mtk_md_dev *mdev)
 {
-	pcim_iounmap_regions(to_pci_dev(mdev->dev), MTK_REQUESTED_BARS);
+	struct pci_dev *pdev = to_pci_dev(mdev->dev);
+
+	pcim_iounmap_region(pdev, MTK_BAR_4_5_IDX);
+	pcim_iounmap_region(pdev, MTK_BAR_2_3_IDX);
+	pcim_iounmap_region(pdev, MTK_BAR_0_1_IDX);
 }
 
 static int mtk_mhccif_irq_cb(int irq_id, void *data)

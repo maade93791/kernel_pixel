@@ -163,14 +163,6 @@ enum mtk_pci_evt_d2h {
 #define MTK_BAR_2_3_IDX                 2
 #define MTK_BAR_4_5_IDX                 4
 
-/* Only use BAR0/1 and 2/3, so we should input 0b0101 for the two bar,
- * Input 0xf would cause error.
- */
-#define MTK_REQUESTED_BARS \
-	((1 << MTK_BAR_0_1_IDX) | \
-	 (1 << MTK_BAR_2_3_IDX) | \
-	 (1 << MTK_BAR_4_5_IDX))
-
 #define MTK_IRQ_CNT_MIN				1
 #define MTK_IRQ_CNT_MAX				32
 #define MTK_IRQ_NAME_LEN			20
