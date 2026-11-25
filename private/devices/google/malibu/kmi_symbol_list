@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+[abi_symbol_list]
+  __bitmap_replace
+  pci_dev_lock
+  pci_dev_unlock
+  pci_pwrctrl_device_set_ready
+  pci_pwrctrl_device_unset_ready
+  perf_allow_kernel
+  smp_call_function_any

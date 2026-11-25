@@ -327,6 +327,7 @@ def device_build(
     kernel_build(
         name = target_kernel,
         outs = [".config"],
+        additional_kmi_symbol_lists = ["@kleaf//build/kernel/kleaf:user_kmi_symbol_lists"],
         collect_unstripped_modules = True,
         kmi_symbol_list = target_kmi_symbol_list,
         make_goals = ["modules"],
