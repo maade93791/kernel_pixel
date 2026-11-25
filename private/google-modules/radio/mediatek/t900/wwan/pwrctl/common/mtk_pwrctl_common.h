@@ -53,7 +53,6 @@ struct pwrctl_mdev {
 
 int mtk_pwrctl_get_power_state(struct pwrctl_mdev *mdev);
 void mtk_pwrctl_set_power_state(struct pwrctl_mdev *mdev,enum pwrctl_state to_state);
-int mtk_pwrctl_gpio_request(struct device *dev, const char *label);
 int mtk_pwrctl_irq_request(struct device *dev, int pin, irq_handler_t handler,
 				  unsigned long irqflags, bool irq_wake_flag);
 int mtk_pwrctl_irq_free(struct device *dev, int irq);

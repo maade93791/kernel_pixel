@@ -10,7 +10,6 @@
 #include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
-#include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/syscore_ops.h>
 #include <linux/platform_device.h>
@@ -223,28 +222,6 @@ int mtk_pwrctl_set_suspend_skip(bool flag)
 	return 0;
 }
 EXPORT_SYMBOL(mtk_pwrctl_set_suspend_skip);
-
-int mtk_pwrctl_gpio_request(struct device *dev, const char *label)
-{
-	int pin;
-	int ret;
-
-	pin = of_get_named_gpio(dev->of_node, label, 0);
-	if (pin < 0) {
-		dev_err(dev, "The GPIO <%s> is probed fail, %d\n", label, pin);
-		return -1;
-	}
-
-	ret = devm_gpio_request(dev, pin, label);
-	if (ret) {
-		dev_err(dev, "Request GPIO <%s> fail, %d\n", label, ret);
-		return -1;
-	}
-
-	dev_info(dev, "Request GPIO <%s:%d> success\n", label, pin);
-	return pin;
-
-}
 
 int mtk_pwrctl_irq_request(struct device *dev, int pin, irq_handler_t handler,
 				  unsigned long irqflags, bool irq_wake_flag)
