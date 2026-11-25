@@ -400,7 +400,6 @@ static ssize_t show_fw_freq(struct cpufreq_policy *policy, char *buf)
 cpufreq_freq_attr_ro(fw_freq);
 
 static struct freq_attr *google_cpufreq_attrs[] = {
-	&cpufreq_freq_attr_scaling_available_freqs,
 	&fw_freq,
 	NULL,
 };
