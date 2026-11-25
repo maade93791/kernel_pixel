@@ -649,8 +649,8 @@ struct ncp_md_adaptor *ncp_md_adaptor_alloc(
 	p_adaptor->noa_port_md_fw_doorbell_addr =
 		(unsigned long)&port->doorbell;
 
-	hrtimer_init(&p_adaptor->timer_tx_recycle, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	p_adaptor->timer_tx_recycle.function = timer_tx_recycle_func;
+	hrtimer_setup(&p_adaptor->timer_tx_recycle, timer_tx_recycle_func,
+		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	p_adaptor->tx_recycle_timeout_ns = 1 * NSEC_PER_MSEC; // 1ms
 
 	p_adaptor->noa2md_ring_done_ptr = 0x0;
