@@ -45,30 +45,14 @@ ddk_module(
             ],
         },
     },
-    copts = [
-    ] + select({
+    copts = select({
         "//private/google-modules/wlan/linux:nl80211_testmode_enabled": ["-DCONFIG_NL80211_TESTMODE=1"],
-        "//conditions:default": [],
-    }) + select({
-        "//private/devices/google/common:soc_is_malibu": [
-            "-include",
-            "wlan_config.h",
-        ],
         "//conditions:default": [],
     }),
     defconfig = "defconfig",
     kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel",
-    deps = select({
-        "//private/devices/google/common:soc_is_malibu": [
-            "//private/google-modules/wlan/linux:cfg80211",
-            "//private/google-modules/wlan/linux:mac80211",
-            "//private/google-modules/wlan/linux:wlan_linux_headers",
-        ],
-        "//conditions:default": [
-            "//common:all_headers_aarch64",
-        ],
-    }),
+    deps = ["//common:all_headers_aarch64"],
 )
 
 ddk_headers(

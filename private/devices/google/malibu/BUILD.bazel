@@ -31,7 +31,12 @@ device_build(
         "//private/google-modules/touch/common:uapi_headers",
         "//private/google-modules/video/cnm:uapi_headers",
     ],
-    defconfig_fragments = ["malibu_defconfig"],
+    defconfig_fragments = ["malibu_defconfig"] + select({
+        "//private/google-modules/wlan/linux:nl80211_testmode_enabled": [
+            "nl80211_testmode_defconfig",
+        ],
+        "//conditions:default": [],
+    }),
     kconfig_exts = ["Kconfig.ext.malibu"],
     kconfigs = [
         # keep sorted

@@ -35,4 +35,6 @@ MALIBU_MODULE_OUTS = [
     "drivers/spi/spi-dw.ko",
     "drivers/spi/spi-loopback-test.ko",
     "drivers/watchdog/softdog.ko",
+    "net/mac80211/mac80211.ko",
+    "net/wireless/cfg80211.ko",
 ]

@@ -16,7 +16,10 @@ bool_flag(
 config_setting(
     name = "nl80211_testmode_enabled",
     flag_values = {":nl80211_testmode": "true"},
-    visibility = ["//private/google-modules/wlan:__subpackages__"],
+    visibility = [
+        "//private/devices/google/malibu:__pkg__",
+        "//private/google-modules/wlan:__subpackages__",
+    ],
 )
 
 ddk_headers(

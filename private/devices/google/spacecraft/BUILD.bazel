@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch")
-load("//private/devices/google/common/kleaf:device_build.bzl", "device_build")
+load("//private/devices/google/common/kleaf:device_build.bzl", "device_build", "intree_module")
 load("//private/devices/google/malibu:constants.bzl", "MALIBU_DTBS", "MALIBU_MODULE_OUTS")
 load(":constants.bzl", "SPACECRAFT_DTBOS")
 
@@ -54,8 +54,8 @@ device_build(
         "//private/google-modules/radio/mediatek/t900/wwan/tmi3/pcie/customize/adsp:mtk_pcimsg_google",
         "//private/google-modules/radio/mediatek/t900/wwan/tmi3/pcie/customize/google:radio_google",
         "//private/google-modules/uwb/slsi/u100",
-        "//private/google-modules/wlan/linux:cfg80211",
-        "//private/google-modules/wlan/linux:mac80211",
+        intree_module("net/wireless/cfg80211.ko"),
+        intree_module("net/mac80211/mac80211.ko"),
         "//private/google-modules/wlan/wonder",
     ],
     vendor_dlkm_modules_blocklisted = [

@@ -64,12 +64,6 @@ ddk_module(
     ] + select({
         "//private/devices/google/common:factory_build": ["-DBCMDHD_FACTORY_BUILD"],
         "//conditions:default": [],
-    }) + select({
-        "//private/devices/google/common:soc_is_malibu": [
-            "-include",
-            "wlan_config.h",
-        ],
-        "//conditions:default": [],
     }),
     includes = [
         ".",
@@ -89,8 +83,7 @@ ddk_module(
         ],
     }) + select({
         "//private/devices/google/common:soc_is_malibu": [
-            "//private/google-modules/wlan/linux:cfg80211",
-            "//private/google-modules/wlan/linux:wlan_linux_headers",
+            "//common:all_headers_aarch64",
             "//private/google-modules/wlan/wonder",
         ],
         "//conditions:default": [],
