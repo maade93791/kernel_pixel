@@ -10325,23 +10325,29 @@ wl_ftm_ranging_format_bw_t convert_nl80211_to_ftm_width(enum nl80211_chan_width 
 	}
 }
 
-static
-enum nl80211_chan_width convert_ftm_to_nl80211_width(wl_ftm_ranging_format_bw_t w)
+static bool convert_ftm_to_nl80211_width(wl_ftm_ranging_format_bw_t w,
+					 enum nl80211_chan_width *width)
 {
 	switch (w) {
 	case WL_FTM_FMT_BW_HE_20:
-		return NL80211_CHAN_WIDTH_20;
+		*width = NL80211_CHAN_WIDTH_20;
+		break;
 	case WL_FTM_FMT_BW_HE_40:
-		return NL80211_CHAN_WIDTH_40;
+		*width = NL80211_CHAN_WIDTH_40;
+		break;
 	case WL_FTM_FMT_BW_HE_80:
-		return NL80211_CHAN_WIDTH_80;
+		*width = NL80211_CHAN_WIDTH_80;
+		break;
 	case WL_FTM_FMT_BW_HE_80_80:
-		return NL80211_CHAN_WIDTH_80P80;
+		*width = NL80211_CHAN_WIDTH_80P80;
+		break;
 	case WL_FTM_FMT_BW_HE_1RF_160:
-		return NL80211_CHAN_WIDTH_160;
+		*width = NL80211_CHAN_WIDTH_160;
+		break;
 	default:
-		return WIFI_CHAN_WIDTH_INVALID;
+		return false;
 	}
+	return true;
 }
 
 static
@@ -11082,12 +11088,11 @@ wl_cfgvif_pmsr_event_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev
 				(pmsr_result->aw_dur_ms >= 0);
 			cfg_pmsr_result.ftm.availability_window = pmsr_result->aw_dur_ms;
 			cfg_pmsr_result.ftm.rssi_avg = pmsr_result->rssi_avg;
-			cfg_pmsr_result.ftm.chan_width =
-				convert_ftm_to_nl80211_width(pmsr_result->format_bw);
+			cfg_pmsr_result.ftm.chan_width_valid =
+				convert_ftm_to_nl80211_width(pmsr_result->format_bw,
+							     &cfg_pmsr_result.ftm.chan_width);
 			cfg_pmsr_result.ftm.preamble =
 				convert_ftm_preamble_to_nl80211(pmsr_result->preamble);
-			cfg_pmsr_result.ftm.chan_width_valid =
-				(cfg_pmsr_result.ftm.chan_width >= 0);
 			cfg_pmsr_result.ftm.preamble_valid = (cfg_pmsr_result.ftm.preamble >= 0);
 			cfg_pmsr_result.ftm.rtt_variance_valid = (pmsr_result->rtt_sd_ps >= 0);
 			cfg_pmsr_result.ftm.dist_variance_valid = (pmsr_result->dist_sd_mm >= 0);
