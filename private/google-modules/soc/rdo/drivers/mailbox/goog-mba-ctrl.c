@@ -601,10 +601,17 @@ static void goog_mba_ctrl_shutdown(struct mbox_chan *chan)
 	mbox_stop_channel(chan);
 }
 
+static bool goog_mba_ctrl_doorbell_last_tx_done(struct mbox_chan *chan)
+{
+	/* The trigger write completes the send. Doorbells have no TX ACK interrupt. */
+	return true;
+}
+
 static struct mbox_chan_ops goog_mba_ctrl_chan_ops = {
 	.send_data = goog_mba_ctrl_send_data,
 	.startup = goog_mba_ctrl_startup,
 	.shutdown = goog_mba_ctrl_shutdown,
+	.last_tx_done = goog_mba_ctrl_doorbell_last_tx_done,
 };
 
 static const struct regmap_config goog_mba_regmap_config = {
@@ -772,7 +779,7 @@ static struct mbox_controller *goog_mba_ctrl_init_mbox(struct goog_mba_ctrl_info
 	if (!mbox)
 		return ERR_PTR(-ENOMEM);
 
-	mbox->txdone_irq = true;
+	mbox->txdone_irq = mbox_ctrler_type != MBOX_CTRL_DOORBELL_MODE;
 	mbox->dev = dev;
 	mbox->ops = &goog_mba_ctrl_chan_ops;
 
@@ -780,6 +787,8 @@ static struct mbox_controller *goog_mba_ctrl_init_mbox(struct goog_mba_ctrl_info
 		mbox->num_chans = mbox_info->msg_buf_size / mbox_info->payload_size;
 		goog_mba_ctrl_init_q_state(mbox_info, mbox->num_chans);
 	} else if (mbox_ctrler_type == MBOX_CTRL_DOORBELL_MODE) {
+		mbox->txdone_poll = true;
+		mbox->txpoll_period = 1;
 		mbox_info->max_client_db_chans = mba_readl(mbox_info,
 							   CLIENT_CLIENT_DOORBELL_OFFSET);
 		mbox_info->max_host_db_chans = mba_readl(mbox_info, CLIENT_HOST_DOORBELL_OFFSET);
