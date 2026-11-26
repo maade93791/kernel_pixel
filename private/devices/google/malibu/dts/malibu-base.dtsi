@@ -418,10 +418,10 @@
 
 	cap_sysfs {
 		compatible = "google,cap-sysfs";
+		#address-cells = <2>;
+		#size-cells = <2>;
 
 		cap_statsbuf: cap_statsbuf@21910C08 {
-			#address-cells = <2>;
-			#size-cells = <2>;
 			reg = <0 0x21910C08 0 0x13F8>;
 		};
 
